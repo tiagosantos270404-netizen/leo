@@ -1,0 +1,28 @@
+# Léo Restaurante & Lancheria
+Options -Indexes
+DirectoryIndex index.html
+RewriteEngine On
+
+# www -> sem www
+RewriteCond %{HTTP_HOST} ^www\.(.+)$ [NC]
+RewriteRule ^ https://%1%{REQUEST_URI} [L,R=301]
+
+# API
+RewriteRule ^api/ api/index.php [L,QSA]
+
+# endereços curtos
+RewriteRule ^loja/?$ index.html [L]
+RewriteRule ^painel/?$ painel.html [L]
+RewriteRule ^pedido/?$ pedido.html [L]
+
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set X-Frame-Options "SAMEORIGIN"
+  <FilesMatch "\.(html)$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+  <FilesMatch "\.(webp|png|jpg)$">
+    Header set Cache-Control "public, max-age=2592000"
+  </FilesMatch>
+</IfModule>
