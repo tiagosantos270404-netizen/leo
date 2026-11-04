@@ -70,6 +70,8 @@ main .inner{display:grid;gap:14px}
 .err{color:var(--cor-erro);font-weight:600}
 .pixcode{font:500 13px/1.4 ui-monospace,Consolas,monospace;word-break:break-all;background:var(--surface-2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;color:var(--muted);max-height:84px;overflow:auto}
 .pixamount{font-family:var(--f-display);font-size:30px;font-weight:700;color:var(--cor-primaria)}
+.pixqr{justify-self:center;width:min(260px,100%);background:#fff;border-radius:14px;padding:6px}
+.pixqr svg{display:block;width:100%;height:auto}
 .demo{background:var(--warn-bg);color:var(--warn);font-weight:600;font-size:14px;padding:10px 14px;border-radius:12px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -95,6 +97,7 @@ main .inner{display:grid;gap:14px}
   <p class="muted" style="font-size:13.5px;text-align:center" id="updated"></p>
 </div></main>
 
+<script src="js/qr.js"></script>
 <script>
 (function(){
 'use strict';
@@ -146,7 +149,7 @@ function render(){
 }
 /* ===== Pix copia e cola (padrão BR Code do Banco Central). A chave vem do painel (Funcionamento > Pix).
    O pagamento cai direto na conta do Léo; ele confere e marca "Pago" no painel. ===== */
-var pix=null;
+var pix=null,pixLoaded=false;
 function emv(id,v){return id+String(v.length).padStart(2,'0')+v}
 function crc16(s){var c=0xFFFF;for(var i=0;i<s.length;i++){c^=s.charCodeAt(i)<<8;for(var j=0;j<8;j++)c=c&0x8000?((c<<1)^0x1021)&0xFFFF:(c<<1)&0xFFFF}return c.toString(16).toUpperCase().padStart(4,'0')}
 function plain(s,n){return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Za-z0-9 ]/g,'').toUpperCase().trim().slice(0,n)}
@@ -158,19 +161,24 @@ function pixCode(cents,txid){
 function renderPix(){
   var o=order,s=o.snapshot,c=$('pixCard');
   var wantsPix=/Pagamento: Pix/.test(s.notes||''),known=s.mode==='pickup'||(o.fee!=null&&o.fee_approved);
-  if(!pix||!pix.key||!wantsPix||o.payment!=='pending'||o.status==='cancelled'||!known){c.hidden=true;return}
+  if(!wantsPix||o.payment!=='pending'||o.status==='cancelled'||!known){c.hidden=true;delete c.dataset.code;return}
+  /* cliente escolheu Pix, mas o restaurante ainda não cadastrou a chave no painel */
+  if(!pix||!pix.key){if(!pixLoaded){c.hidden=true;return}
+    if(c.dataset.code==='sem-chave')return;c.dataset.code='sem-chave';c.hidden=false;
+    c.innerHTML='<h2>Pagamento com Pix</h2><p class="note">O Léo vai te passar a chave Pix pelo WhatsApp. Se preferir, chame agora.</p><a class="btn btn-primary" href="https://wa.me/5551996200841?text='+encodeURIComponent('Olá! Quero pagar o pedido '+o.number+' com Pix. Qual é a chave?')+'" target="_blank" rel="noopener">Pedir a chave Pix no WhatsApp</a>';return}
   var cents=s.subtotal+(o.fee||0),code=pixCode(cents,'PEDIDO'+String(o.number).replace(/\D/g,''));
   if(c.dataset.code===code&&!c.hidden)return;
   c.dataset.code=code;c.hidden=false;
-  c.innerHTML='<h2>Pague com Pix</h2><p class="muted">Copie o código e cole no app do seu banco, em <b style="color:var(--carvao)">Pix copia e cola</b>. O valor já vem preenchido.</p>'+
-    '<p class="pixamount num">'+money(cents)+'</p><div class="pixcode" id="pixCode">'+esc(code)+'</div>'+
+  var qr='';try{qr='<div class="pixqr">'+qrSvg(code,'QR code Pix de '+money(cents))+'</div>'}catch(e){}
+  c.innerHTML='<h2>Pague com Pix</h2><p class="muted">'+(qr?'Escaneie o QR code no app do seu banco ou copie o código abaixo e cole em ':'Copie o código e cole no app do seu banco, em ')+'<b style="color:var(--carvao)">Pix copia e cola</b>. O valor já vem preenchido.</p>'+
+    '<p class="pixamount num">'+money(cents)+'</p>'+qr+'<div class="pixcode" id="pixCode">'+esc(code)+'</div>'+
     '<button class="btn btn-primary" id="pixCopy">Copiar código Pix</button>'+
     '<p class="muted" style="font-size:14px">Depois de pagar, o Léo confirma e esta página mostra "Pagamento confirmado". Se preferir, mande o comprovante no WhatsApp.</p>';
   $('pixCopy').onclick=function(){var b=this;function ok(){b.textContent='Código copiado ✓';setTimeout(function(){b.textContent='Copiar código Pix'},2500)}
     function sel(){var r=document.createRange();r.selectNodeContents($('pixCode'));var g=getSelection();g.removeAllRanges();g.addRange(r);b.textContent='Código selecionado: copie'}
     try{navigator.clipboard.writeText(code).then(ok,sel)}catch(e){sel()}};
 }
-async function loadPix(){try{var c=DEMO?{pix:{key:'+5551996200841',name:'Leo Restaurante',city:'Barra do Ribeiro'}}:await api('catalog');pix=c.pix&&c.pix.key?c.pix:null;if(order)render()}catch(e){}}
+async function loadPix(){try{var c=DEMO?{pix:{key:'+5551996200841',name:'Leo Restaurante',city:'Barra do Ribeiro'}}:await api('catalog');pix=c.pix&&c.pix.key?c.pix:null;pixLoaded=true;if(order)render()}catch(e){}}
 async function load(){
   try{order=await api(pathFor());render()}
   catch(e){
