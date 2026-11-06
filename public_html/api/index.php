@@ -167,9 +167,12 @@ function orderToken(string $id): string { return substr(hmac("order.$id"), 0, 32
 function compute(array $in, array $s): array {
     if (empty($s['acceptingOrders'])) fail(409, 'O Léo não está recebendo pedidos pelo site agora. Fale pelo WhatsApp (51) 99620-0841.');
     if (!isOpenNow($s)) fail(409, 'Estamos fechados agora. Confira o horário no site.');
-    $mode = ($in['mode'] ?? '') === 'delivery' ? 'delivery' : (($in['mode'] ?? '') === 'pickup' ? 'pickup' : fail(422, 'Escolha entrega ou retirada.'));
-    if ($mode === 'delivery' && empty($s['deliveryEnabled'])) fail(409, 'A entrega está pausada agora. Escolha retirada.');
-    if ($mode === 'pickup' && empty($s['pickupEnabled'])) fail(409, 'A retirada está pausada agora. Escolha entrega.');
+    /* tipo de pedido: delivery = entrega, pickup = retirar no balcão (para levar), dine_in = comer no restaurante */
+    $mode = (string) ($in['mode'] ?? '');
+    if (!in_array($mode, ['delivery', 'pickup', 'dine_in'], true)) fail(422, 'Escolha o tipo de pedido: entrega, para levar ou comer no restaurante.');
+    if ($mode === 'delivery' && empty($s['deliveryEnabled'])) fail(409, 'A entrega está pausada agora. Escolha outra opção.');
+    if ($mode !== 'delivery' && empty($s['pickupEnabled'])) fail(409, 'O atendimento no balcão está pausado agora. Escolha entrega.');
+    $table = $mode === 'dine_in' ? str($in['table'] ?? '', 10) : '';
     $c = (array) ($in['customer'] ?? []); $name = str($c['name'] ?? '', 80); $phone = str($c['phone'] ?? '', 30);
     if ($name === '') fail(422, 'Informe seu nome.');
     $digits = preg_replace('/\D/', '', $phone); if (strlen($digits) < 10 || strlen($digits) > 13) fail(422, 'Informe um telefone com DDD.');
@@ -191,14 +194,14 @@ function compute(array $in, array $s): array {
         $lines[] = ['id' => $p['id'], 'name' => ($p['group'] === 5 ? 'Minuta ' : '') . $p['name'], 'qty' => $qty, 'total' => $unit * $qty, 'extras' => $ex, 'note' => str($l['note'] ?? '', 300)];
         $sub += $unit * $qty;
     }
-    $fee = $mode === 'pickup' ? 0 : null;
+    $fee = $mode === 'delivery' ? null : 0; // taxa de entrega só na entrega
     if ($mode === 'delivery') {
         $rule = null;
         foreach ($s['deliveryRules'] as $r) if (normBairro($r['neighborhood']) === normBairro($nb) && (!$rule || $r['available'])) $rule = $r;
         if (!empty($s['restrictDelivery']) && (!$rule || !$rule['available'])) fail(409, "Ainda não entregamos no bairro $nb. Fale com a gente no WhatsApp.");
         if ($rule && $rule['available']) { $fee = $rule['fee']; $nb = $rule['neighborhood']; }
     }
-    return ['mode' => $mode, 'customer' => ['name' => $name, 'phone' => $phone], 'address' => $address, 'neighborhood' => $nb,
+    return ['mode' => $mode, 'table' => $table, 'customer' => ['name' => $name, 'phone' => $phone], 'address' => $address, 'neighborhood' => $nb,
         'notes' => str($in['notes'] ?? '', 600), 'lines' => $lines, 'subtotal' => $sub, 'fee' => $fee];
 }
 function quoteSig(array $q, int $exp): string { return $exp . '.' . hmac('quote.' . $exp . '.' . json_encode($q, JSON_UNESCAPED_UNICODE)); }
@@ -276,7 +279,7 @@ try {
         $id = bin2hex(random_bytes(12)); $ms = nowMs();
         $o = ['id' => $id, 'number' => '', 'created' => iso($ms), 'status' => 'received', 'payment' => 'pending', 'fee' => $q['fee'],
             'fee_approved' => $q['fee'] !== null, 'cancelReason' => '', 'version' => 1,
-            'snapshot' => ['customer' => $q['customer'], 'mode' => $q['mode'], 'address' => $q['address'], 'neighborhood' => $q['neighborhood'], 'notes' => $q['notes'], 'lines' => $q['lines'], 'subtotal' => $q['subtotal']]];
+            'snapshot' => ['customer' => $q['customer'], 'mode' => $q['mode'], 'table' => $q['table'], 'address' => $q['address'], 'neighborhood' => $q['neighborhood'], 'notes' => $q['notes'], 'lines' => $q['lines'], 'subtotal' => $q['subtotal']]];
         $pdo = db(); $pdo->beginTransaction();
         $pdo->prepare('INSERT INTO orders (id, created_ts, idem, version, data) VALUES (?, ?, ?, 1, ?)')->execute([$id, $ms, $key, '{}']);
         $o['number'] = '#' . $pdo->lastInsertId(); saveOrder($o); $pdo->commit();

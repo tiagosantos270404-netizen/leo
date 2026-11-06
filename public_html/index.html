@@ -222,6 +222,15 @@ select.inp{min-height:50px;appearance:auto}
 .seg{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--surface-2);border-radius:14px;padding:4px}
 .seg button{min-height:46px;border:0;border-radius:11px;background:transparent;font-weight:700;cursor:pointer}
 .seg button[aria-pressed="true"]{background:var(--surface);box-shadow:var(--shadow);color:var(--brasa)}
+.modes{display:grid;gap:10px}
+.modes button{display:flex;align-items:center;gap:14px;width:100%;min-height:64px;padding:12px 16px;border-radius:14px;border:1.5px solid var(--line);background:var(--surface);color:var(--carvao);text-align:left;cursor:pointer}
+.modes button svg{flex:0 0 auto;color:var(--muted)}
+.modes button b{display:block;font-size:16px}
+.modes button small{display:block;color:var(--muted);font-size:13px;font-weight:500}
+.modes button[aria-checked="true"]{border-color:var(--cor-primaria);background:rgba(247,147,30,.12)}
+.modes button[aria-checked="true"] b,.modes button[aria-checked="true"] svg{color:var(--cor-primaria)}
+.modes button:hover{border-color:var(--cor-primaria)}
+.modes.invalid button{border-color:var(--erro)}
 .pays{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .pays button{min-height:48px;border-radius:12px;border:1.5px solid var(--line);background:var(--surface);font-weight:600;cursor:pointer}
 .pays button[aria-pressed="true"]{border-color:var(--brasa);color:var(--brasa);background:var(--surface-2)}
@@ -376,7 +385,7 @@ function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp
 
 /* ---------- estado ---------- */
 var KEY='xleo-sacola-v1';
-var cart=[]; var form={name:'',phone:'',mode:'entrega',bairro:'',address:'',pay:'Pix',troco:'',notes:''};
+var cart=[]; var form={name:'',phone:'',mode:'',mesa:'',bairro:'',address:'',pay:'Pix',troco:'',notes:''};
 try{var saved=JSON.parse(localStorage.getItem(KEY)||'null');if(saved){cart=(saved.cart||[]).filter(function(l){return byId[l.id]});Object.assign(form,saved.form||{})}}catch(e){}
 function persist(){try{localStorage.setItem(KEY,JSON.stringify({cart:cart,form:form}))}catch(e){}}
 function count(){return cart.reduce(function(s,l){return s+l.qty},0)}
@@ -408,7 +417,8 @@ function applyCatalog(c){
   live.fees={};rules.forEach(function(r){live.fees[normBairro(r.neighborhood)]=r.fee==null?null:r.fee});
   live.restrict=!!c.restrictDelivery&&live.areas.length>0;
   live.hours=Array.isArray(c.hours)?c.hours.filter(function(h){return h&&h.open&&h.close}):[];live.hoursOn=!!c.hoursConfirmed&&live.hours.length>0;
-  if(!live.delivery&&form.mode==='entrega')form.mode='retirada';if(!live.pickup&&form.mode==='retirada')form.mode='entrega';
+  /* opção pausada no painel: o cliente escolhe de novo */
+  if(!live.delivery&&form.mode==='entrega')form.mode='';if(!live.pickup&&(form.mode==='retirada'||form.mode==='local'))form.mode='';
   cart=cart.filter(function(l){return byId[l.id]&&byId[l.id].available&&groups[byId[l.id].group]});
 }
 
@@ -536,6 +546,19 @@ function stepsHTML(){var s=['Sacola','Seus dados','Revisar'],i={bag:0,dados:1,re
 /* frete por bairro (cadastrado no painel). Comparação sem acento, maiúsculas nem a palavra "bairro", igual ao servidor */
 function normBairro(s){return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/^\s*bairro\s+/,'').replace(/\s+/g,' ').trim()}
 function knownFee(b){var k=normBairro(b);return k&&live.fees&&Object.prototype.hasOwnProperty.call(live.fees,k)?live.fees[k]:undefined}
+/* tipo de pedido: entrega, retirar no balcão (para levar) ou comer no restaurante. Escolha obrigatória. */
+var MODES=[
+  ['entrega','Entrega','Levamos até o seu endereço','<path d="M3 7h11v9H3zM14 10h4l3 3v3h-7z"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/>'],
+  ['retirada','Retirar no balcão (para levar)','Sem taxa de entrega','<path d="M6 8h12l-1 12H7z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/>'],
+  ['local','Comer no restaurante','Sem taxa de entrega','<path d="M7 3v8M5 3v4a2 2 0 0 0 4 0V3M7 11v10M17 3c-2 0-3 2-3 6h3v12"/>']];
+function modesHTML(){
+  var opts=MODES.filter(function(m){return m[0]==='entrega'?live.delivery:live.pickup});
+  return '<div class="field"><span class="lbl" id="modeLbl">Como você quer o pedido?</span><div class="modes" id="fModes" role="radiogroup" aria-labelledby="modeLbl">'+
+    opts.map(function(m){var on=form.mode===m[0];return '<button type="button" role="radio" data-mode="'+m[0]+'" aria-checked="'+on+'" tabindex="'+(on||(!form.mode&&m===opts[0])?0:-1)+'">'+
+      '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+m[3]+'</svg>'+
+      '<span><b>'+m[1]+'</b><small>'+m[2]+'</small></span></button>'}).join('')+
+    '</div><span class="err" id="eMode" hidden>Escolha uma opção para continuar.</span></div>';
+}
 function sumHTML(){
   var h='<div class="sum"><div><span>Subtotal</span><span>'+money(subtotal())+'</span></div>';
   var fee=form.mode==='entrega'?knownFee(form.bairro):0;
@@ -572,21 +595,23 @@ function renderBag(){
     body.innerHTML=stepsHTML()+
     '<div class="field"><label for="fName">Seu nome</label><input id="fName" type="text" autocomplete="given-name" value="'+esc(form.name)+'"><span class="err" id="eName" hidden>Informe seu nome para identificarmos o pedido.</span></div>'+
     '<div class="field"><label for="fPhone">WhatsApp / telefone</label><input id="fPhone" type="tel" autocomplete="tel" inputmode="tel" placeholder="(51) 9…" value="'+esc(form.phone)+'"><span class="err" id="ePhone" hidden>Informe um telefone para o restaurante falar com você.</span></div>'+
-    '<div class="field"><span class="lbl">Como prefere receber?</span><div class="seg" role="group">'+(live.delivery?'<button data-mode="entrega" aria-pressed="'+(form.mode==='entrega')+'">Entrega</button>':'')+(live.pickup?'<button data-mode="retirada" aria-pressed="'+(form.mode==='retirada')+'">Retirar no local</button>':'')+'</div></div>'+
+    modesHTML()+
     (etaText(form.mode)?'<p class="hint">Tempo estimado: <b style="color:var(--carvao)">'+esc(etaText(form.mode))+'</b></p>':'')+
     (form.mode==='entrega'?
       bairroHTML()+
       '<div class="field"><label for="fAddr">Endereço e número <small>com ponto de referência</small></label><input id="fAddr" type="text" autocomplete="street-address" value="'+esc(form.address)+'"><span class="err" id="eAddr" hidden>Informe o endereço para a entrega.</span></div>'
-      :'<p style="color:var(--muted);font-size:14.5px">Retire em: Av. Visconde do Rio Grande, 1451, Centro.</p>')+
-    '<div class="field"><span class="lbl">Pagamento <small>'+(live.pix&&live.on?'Pix: pague pelo site depois de confirmar':'na entrega ou retirada')+'</small></span><div class="pays" role="group">'+['Pix','Cartão','Dinheiro'].map(function(p){return '<button data-pay="'+p+'" aria-pressed="'+(form.pay===p)+'">'+p+'</button>'}).join('')+'</div></div>'+
+      :form.mode==='retirada'?'<p style="color:var(--muted);font-size:14.5px">Retire no balcão: Av. Visconde do Rio Grande, 1451, Centro.</p>'
+      :form.mode==='local'?'<div class="field"><label for="fMesa">Número da mesa <small>(opcional)</small></label><input id="fMesa" type="text" maxlength="10" placeholder="Ex.: 5" value="'+esc(form.mesa||'')+'"><span class="hint">Já está sentado? Informe a mesa para levarmos até você.</span></div>':'')+
+    '<div class="field"><span class="lbl">Pagamento <small>'+(live.pix&&live.on?'Pix: pague pelo site depois de confirmar':'na entrega ou no restaurante')+'</small></span><div class="pays" role="group">'+['Pix','Cartão','Dinheiro'].map(function(p){return '<button data-pay="'+p+'" aria-pressed="'+(form.pay===p)+'">'+p+'</button>'}).join('')+'</div></div>'+
     (form.pay==='Dinheiro'?'<div class="field"><label for="fTroco">Troco para quanto? <small>(opcional)</small></label><input id="fTroco" type="text" inputmode="decimal" placeholder="Ex.: 100" value="'+esc(form.troco)+'"></div>':'')+
     '<div class="field"><label for="fNotes">Observações gerais <small>(opcional)</small></label><textarea id="fNotes" placeholder="Ex.: interfone com defeito, chamar no portão">'+esc(form.notes)+'</textarea></div>'+
+    '<div id="dadosSum">'+sumHTML()+'</div>'+
     '<p class="legal">Seus dados são usados só para preparar e entregar este pedido.</p>';
     foot.innerHTML='<button class="btn btn-primary" data-act="revisar">Revisar pedido</button>';
   } else if(step==='revisar'&&live.on){
     body.innerHTML=stepsHTML()+'<div id="quoteBox"><p class="muted">Calculando o total com o restaurante…</p></div>'+
       '<div class="box-lines">'+cart.map(function(l){var p=byId[l.id],d=lineDesc(l);return '<div class="line"><h4>'+l.qty+'× '+(p.group===MINUTA?'Minuta ':'')+esc(p.name)+'</h4><span class="lp">'+money(linePrice(l)*l.qty)+'</span>'+(d?'<span class="note">'+esc(d)+'</span>':'')+'</div>'}).join('')+'</div>'+
-      '<p style="font-size:14px;color:var(--muted)">'+esc(form.name)+' · '+esc(form.phone)+'<br>'+(form.mode==='entrega'?esc(form.address)+' — '+esc(form.bairro):'Retirada no balcão')+'<br>Pagamento: '+esc(payText())+'</p><p class="err" id="sendErr" role="alert"></p>';
+      '<p style="font-size:14px;color:var(--muted)">'+esc(form.name)+' · '+esc(form.phone)+'<br>'+esc(modeText())+'<br>Pagamento: '+esc(payText())+'</p><p class="err" id="sendErr" role="alert"></p>';
     foot.innerHTML='<button class="btn btn-primary" data-act="send" id="sendBtn" disabled>Confirmar pedido</button>'+waBtn('btn-ghost','Prefiro enviar pelo WhatsApp');
     getQuote();
   } else if(step==='revisar'){
@@ -610,6 +635,7 @@ function readForm(){
   if(sel!==null){form.bairroOutro=sel==='__outro';if(sel!=='__outro')form.bairro=sel;else if(g('fBairro')!==null)form.bairro=g('fBairro')}
   else if(g('fBairro')!==null)form.bairro=g('fBairro');
   if(g('fAddr')!==null)form.address=g('fAddr');
+  if(g('fMesa')!==null)form.mesa=g('fMesa');
   if(g('fTroco')!==null)form.troco=g('fTroco');  if(g('fNotes')!==null)form.notes=g('fNotes');
   persist();
 }
@@ -618,6 +644,9 @@ function validate(){
   function chk(id,eid,bad){var el=$(id);if(!el)return;el.classList.toggle('invalid',bad);$(eid).hidden=!bad;if(bad&&ok){el.focus();ok=false}}
   chk('fName','eName',!form.name.trim());
   if(live.on)chk('fPhone','ePhone',String(form.phone||'').replace(/\D/g,'').length<10);
+  var badMode=!MODES.some(function(m){return m[0]===form.mode&&$('fModes').querySelector('[data-mode="'+m[0]+'"]')});
+  $('fModes').classList.toggle('invalid',badMode);$('eMode').hidden=!badMode;
+  if(badMode&&ok){$('fModes').querySelector('button').focus();ok=false}
   if(form.mode==='entrega'){if($('fBairroSel'))chk('fBairroSel','eBairro',!$('fBairroSel').value);chk('fBairro','eBairro',!form.bairro.trim());chk('fAddr','eAddr',!form.address.trim())}
   return ok;
 }
@@ -630,7 +659,7 @@ function message(){
   L.push('','Subtotal: '+money(subtotal()),'');
   L.push('Nome: '+form.name.trim());
   if(String(form.phone||'').trim())L.push('Telefone: '+form.phone.trim());
-  if(form.mode==='entrega'){L.push('Entrega','Bairro: '+form.bairro.trim(),'Endereço: '+form.address.trim())}else L.push('Retirada no local');
+  if(form.mode==='entrega'){L.push('Entrega','Bairro: '+form.bairro.trim(),'Endereço: '+form.address.trim())}else L.push(modeText());
   L.push('Pagamento: '+payText());
   if(form.notes.trim())L.push('Observações: '+form.notes.trim());
   L.push('','Aguardo a confirmação'+(form.mode==='entrega'?' e o valor da entrega.':'.'));
@@ -641,7 +670,8 @@ function waBtn(cls,label){return '<a class="btn '+cls+'" id="waLink" href="https
 
 /* pedido pelo servidor: mesmo formato do site atual (cotação assinada + chave contra pedido duplicado) */
 var quote=null;
-function orderInput(){return {lines:cart.map(function(l){return {id:l.id,qty:l.qty,note:lineNote(l).slice(0,300),extras:(l.extras||[]).slice()}}),mode:form.mode==='entrega'?'delivery':'pickup',customer:{name:form.name.trim(),phone:String(form.phone||'').trim()},address:form.mode==='entrega'?form.address.trim():'',neighborhood:form.mode==='entrega'?form.bairro.trim():'',notes:(form.notes.trim()?form.notes.trim()+' · ':'')+'Pagamento: '+payText()}}
+function modeText(){return form.mode==='entrega'?form.address.trim()+' — '+form.bairro.trim():form.mode==='local'?'Comer no restaurante'+(String(form.mesa||'').trim()?' · Mesa '+String(form.mesa).trim():''):'Retirar no balcão (para levar)'}
+function orderInput(){return {lines:cart.map(function(l){return {id:l.id,qty:l.qty,note:lineNote(l).slice(0,300),extras:(l.extras||[]).slice()}}),mode:{entrega:'delivery',retirada:'pickup',local:'dine_in'}[form.mode],table:form.mode==='local'?String(form.mesa||'').trim().slice(0,10):'',customer:{name:form.name.trim(),phone:String(form.phone||'').trim()},address:form.mode==='entrega'?form.address.trim():'',neighborhood:form.mode==='entrega'?form.bairro.trim():'',notes:(form.notes.trim()?form.notes.trim()+' · ':'')+'Pagamento: '+payText()}}
 async function getQuote(){
   quote=null;var input=orderInput();
   try{var q=await apiCall('quote',input);quote={input:input,q:q};
@@ -676,7 +706,7 @@ function upsellHTML(){
   return '<div class="upsell"><b>Vai uma bebida?</b><div class="upsell-row">'+picks.map(function(p){return '<button class="up" data-up="'+esc(p.id)+'"><span>'+esc(p.name)+'</span><small>+ '+money(p.price)+'</small></button>'}).join('')+'</div></div>';
 }
 /* tempo estimado definido no painel */
-function etaText(mode){return live.eta&&(mode==='entrega'?live.eta.delivery:live.eta.pickup)||''}
+function etaText(mode){return mode&&live.eta&&(mode==='entrega'?live.eta.delivery:live.eta.pickup)||''}
 function showEta(){var d=etaText('entrega'),p=etaText('retirada');$('etaInfo').textContent=d||p?(d?'Entrega '+d:'')+(d&&p?' · ':'')+(p?'Retirada '+p:''):'Entrega ou retirada'}
 /* pedir de novo: guarda o último pedido neste celular */
 function saveLast(){try{localStorage.setItem('xleo-ultimo-pedido',JSON.stringify({d:Date.now(),lines:cart.map(function(l){return {id:l.id,qty:l.qty,choice:l.choice||'',note:l.note||'',remove:(l.remove||[]).slice(),extras:(l.extras||[]).slice()}})}))}catch(e){}}
@@ -686,7 +716,10 @@ function showAgain(){var l=lastOrder(),b=$('againBtn');b.hidden=!l.length||cart.
 $('againBtn').addEventListener('click',function(){var l=lastOrder();if(!l.length)return;
   var all=(function(){try{return JSON.parse(localStorage.getItem('xleo-ultimo-pedido')).lines.length}catch(e){return l.length}})();
   cart=l;persist();refresh();step='bag';openBag();if(all>l.length)toast('Alguns itens do último pedido estão esgotados hoje')});
-$('bagSheet').addEventListener('input',readForm);$('bagSheet').addEventListener('change',function(e){
+$('bagSheet').addEventListener('input',readForm);$('bagSheet').addEventListener('keydown',function(e){
+  var b=e.target.closest&&e.target.closest('#fModes [data-mode]');if(!b||['ArrowDown','ArrowRight','ArrowUp','ArrowLeft'].indexOf(e.key)<0)return;
+  e.preventDefault();var all=[].slice.call($('fModes').querySelectorAll('[data-mode]')),i=all.indexOf(b),n=all[(i+(e.key==='ArrowDown'||e.key==='ArrowRight'?1:all.length-1))%all.length];n.click()});
+$('bagSheet').addEventListener('change',function(e){
   if(e.target.id==='fBairroSel'){readForm();if(e.target.value==='__outro'){form.bairroOutro=true;form.bairro=''}persist();renderBag();var t=$('fBairro')||$('fBairroSel');if(t)t.focus();return}
   if(e.target.tagName==='SELECT')readForm()});
 $('bagSheet').addEventListener('click',function(e){
@@ -694,7 +727,7 @@ $('bagSheet').addEventListener('click',function(e){
   if(t.dataset.inc!==undefined){cart[+t.dataset.inc].qty++;persist();refresh();renderBag();return}
   if(t.dataset.dec!==undefined){var l=cart[+t.dataset.dec];l.qty--;if(l.qty<1)cart.splice(+t.dataset.dec,1);persist();refresh();renderBag();return}
   if(t.dataset.rm!==undefined){cart.splice(+t.dataset.rm,1);persist();refresh();renderBag();return}
-  if(t.dataset.mode){readForm();form.mode=t.dataset.mode;persist();renderBag();return}
+  if(t.dataset.mode){readForm();form.mode=t.dataset.mode;persist();renderBag();var mb=$('fModes')&&$('fModes').querySelector('[data-mode="'+form.mode+'"]');if(mb)mb.focus();return}
   if(t.dataset.pay){readForm();form.pay=t.dataset.pay;persist();renderBag();return}
   if(t.id==='waLink'){saveLast();setTimeout(function(){step='enviado';renderBag()},300);return}
   if(t.dataset.up&&choiceFor(byId[t.dataset.up])){var uid=t.dataset.up;closeAll();openItem(uid,true);return}

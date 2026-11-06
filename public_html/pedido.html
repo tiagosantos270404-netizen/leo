@@ -117,7 +117,7 @@ async function api(path,body,method){
 function pathFor(){return 'orders/'+encodeURIComponent(id)+(token?'?token='+encodeURIComponent(token):'')}
 
 var titles={received:'Pedido recebido',preparing:'Em preparo',ready:'Pronto!',out_for_delivery:'Saiu para entrega',completed:'Pedido concluído',cancelled:'Pedido cancelado'};
-function subtitle(o){var s=o.snapshot;return {received:'O Léo já recebeu seu pedido e vai começar em instantes.',preparing:'Seu pedido está na chapa.',ready:s.mode==='delivery'?'Pronto e aguardando o entregador.':'Pode vir buscar no balcão: Av. Visconde do Rio Grande, 1451.',out_for_delivery:'O entregador está a caminho.',completed:'Bom apetite! Obrigado por pedir no Léo.',cancelled:'Se tiver dúvidas, fale com o restaurante pelo WhatsApp.'}[o.status]}
+function subtitle(o){var s=o.snapshot;return {received:'O Léo já recebeu seu pedido e vai começar em instantes.',preparing:'Seu pedido está na chapa.',ready:s.mode==='delivery'?'Pronto e aguardando o entregador.':s.mode==='dine_in'?'Já vamos servir'+(s.table?' na mesa '+s.table:' você')+'.':'Pode vir buscar no balcão: Av. Visconde do Rio Grande, 1451.',out_for_delivery:'O entregador está a caminho.',completed:'Bom apetite! Obrigado por pedir no Léo.',cancelled:'Se tiver dúvidas, fale com o restaurante pelo WhatsApp.'}[o.status]}
 
 function render(){
   var o=order,s=o.snapshot;
@@ -134,7 +134,7 @@ function render(){
   renderPix();
   // etapas
   var flow=s.mode==='delivery'?['received','preparing','ready','out_for_delivery','completed']:['received','preparing','ready','completed'];
-  var names={received:'Recebido',preparing:'Em preparo',ready:s.mode==='delivery'?'Pronto':'Pronto para retirar',out_for_delivery:'Saiu para entrega',completed:s.mode==='delivery'?'Entregue':'Retirado'};
+  var names={received:'Recebido',preparing:'Em preparo',ready:s.mode==='delivery'?'Pronto':s.mode==='dine_in'?'Pronto para servir':'Pronto para retirar',out_for_delivery:'Saiu para entrega',completed:s.mode==='delivery'?'Entregue':s.mode==='dine_in'?'Servido':'Retirado'};
   if(o.status==='cancelled'){$('stepsCard').hidden=false;$('steps').innerHTML='<li class="now"><span class="dot">×</span><span><b>Cancelado</b><small>Este pedido foi cancelado pelo restaurante.'+(o.cancelReason?' Motivo: '+esc(o.cancelReason)+'.':'')+'</small></span></li>'}
   else{var at=flow.indexOf(o.status);$('stepsCard').hidden=false;
     $('steps').innerHTML=flow.map(function(k,i){var c=i<at||o.status==='completed'?'done':i===at?'now':'todo';return '<li class="'+c+'"><span class="dot">'+(c==='done'?'✓':'')+'</span><span><b>'+names[k]+'</b>'+(c==='now'&&k!=='completed'?'<small>agora</small>':'')+'</span></li>'}).join('')}
@@ -143,7 +143,7 @@ function render(){
   $('itemsCard').innerHTML='<h2>Itens</h2>'+s.lines.map(function(l){return '<div class="line"><b>'+l.qty+'× '+esc(l.name)+'</b><span class="num">'+money(l.total)+'</span>'+(l.extras&&l.extras.length?'<small>+ '+l.extras.map(function(x){return esc(x.name)}).join(', ')+'</small>':'')+(l.note?'<small>'+esc(l.note)+'</small>':'')+'</div>'}).join('')+
     '<div class="totals" style="border-top:1px solid var(--line);padding-top:10px;display:grid;gap:4px"><div><span>Produtos</span><span>'+money(s.subtotal)+'</span></div>'+(s.mode==='delivery'?'<div><span>Entrega</span><span>'+money(o.fee)+'</span></div>':'')+
     '<div class="big"><span>Total</span><span>'+(s.mode==='delivery'&&o.fee==null?money(s.subtotal)+' + entrega':money(s.subtotal+(o.fee||0)))+'</span></div></div>'+
-    '<p class="muted" style="font-size:14px">'+(s.mode==='delivery'?'Entrega: '+esc(s.address)+' — '+esc(s.neighborhood):'Retirada no balcão: Av. Visconde do Rio Grande, 1451, Centro')+'<br>'+esc(s.customer.name)+' · '+esc(s.customer.phone)+'</p>'+
+    '<p class="muted" style="font-size:14px">'+(s.mode==='delivery'?'Entrega: '+esc(s.address)+' — '+esc(s.neighborhood):s.mode==='dine_in'?'Comer no restaurante'+(s.table?' · Mesa '+esc(s.table):''):'Retirar no balcão (para levar): Av. Visconde do Rio Grande, 1451, Centro')+'<br>'+esc(s.customer.name)+' · '+esc(s.customer.phone)+'</p>'+
     (o.payment==='approved'?'<p class="okmsg">Pagamento confirmado</p>':'');
   $('updated').textContent=['completed','cancelled'].indexOf(o.status)>-1?'':'Esta página atualiza sozinha · '+fmtTime.format(new Date());
 }
@@ -160,7 +160,7 @@ function pixCode(cents,txid){
 }
 function renderPix(){
   var o=order,s=o.snapshot,c=$('pixCard');
-  var wantsPix=/Pagamento: Pix/.test(s.notes||''),known=s.mode==='pickup'||(o.fee!=null&&o.fee_approved);
+  var wantsPix=/Pagamento: Pix/.test(s.notes||''),known=s.mode!=='delivery'||(o.fee!=null&&o.fee_approved);
   if(!wantsPix||o.payment!=='pending'||o.status==='cancelled'||!known){c.hidden=true;delete c.dataset.code;return}
   /* cliente escolheu Pix, mas o restaurante ainda não cadastrou a chave no painel */
   if(!pix||!pix.key){if(!pixLoaded){c.hidden=true;return}

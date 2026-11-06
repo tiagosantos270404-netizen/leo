@@ -95,6 +95,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--brasa);outline:none}
 .ocard .items{font-size:14px;color:var(--muted);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .ocard .foot{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
 .ocard .tot{font-family:var(--f-display);font-weight:700;font-size:18px;font-variant-numeric:tabular-nums}
+/* tipo de pedido em destaque: ENTREGA / PARA LEVAR / COMER NO LOCAL */
+.otype{display:flex;align-items:center;justify-content:space-between;gap:10px;border-radius:12px;padding:10px 14px;font-family:var(--f-display);font-weight:700;font-size:22px;letter-spacing:.04em;text-transform:uppercase;line-height:1.1}
+.otype small{font:inherit;font-size:20px;white-space:nowrap}
+.otype.t-delivery{background:var(--cor-primaria);color:#0D0D0D}
+.otype.t-pickup{background:#FFFFFF;color:#0D0D0D}
+.otype.t-dine_in{background:var(--cor-sucesso);color:#0D0D0D}
 .pills{display:flex;gap:6px;flex-wrap:wrap}
 .pill{font-size:12px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap;background:var(--surface-2);color:var(--carvao)}
 .p-received{background:var(--bad-bg);color:var(--bad)}
@@ -455,11 +461,15 @@ function ticketDoc(title,inner){
     '.big{font-size:15px}.tot{font-size:19px;font-weight:900}.box{border:2px solid #000;padding:1.5mm;margin:2mm 0;font-size:15px;font-weight:900}'+
     '</style></head><body><div class="brand">LÉO RESTAURANTE &amp; LANCHERIA</div>'+inner+'</body></html>';
 }
+/* tipo de pedido (pedidos antigos só têm delivery/pickup; pickup = retirar no balcão, para levar) */
+function modeName(s){return {delivery:'Entrega',pickup:'Para levar',dine_in:'Comer no local'}[s.mode]||'Para levar'}
+function tableOf(s){return s.mode==='dine_in'&&String(s.table||'').trim()?String(s.table).trim():''}
+function typeBanner(s){var t=tableOf(s);return '<div class="otype t-'+(s.mode==='delivery'||s.mode==='dine_in'?s.mode:'pickup')+'"><span>'+modeName(s)+'</span>'+(t?'<small>Mesa '+esc(t)+'</small>':'')+'</div>'}
 function ticketHTML(o){
-  var s=o.snapshot,del=s.mode==='delivery';
+  var s=o.snapshot,del=s.mode==='delivery',t=tableOf(s);
   function r(a,b,cls){return '<div class="r'+(cls?' '+cls:'')+'"><span>'+a+'</span><span>'+b+'</span></div>'}
-  var h='<div class="num">PEDIDO '+esc(o.number)+'</div><p class="c">'+fmtDate.format(new Date(o.created))+'</p>'+
-    '<div class="mode">'+(del?'ENTREGA':'RETIRADA NO BALCÃO')+'</div>'+
+  var h='<div class="mode" style="font-size:24px;padding:2.5mm 1.5mm">'+esc(modeName(s).toUpperCase())+(t?'<br>MESA '+esc(t.toUpperCase()):'')+'</div>'+
+    '<div class="num">PEDIDO '+esc(o.number)+'</div><p class="c">'+fmtDate.format(new Date(o.created))+'</p>'+
     '<p class="big">'+esc(s.customer.name)+'</p><p>Tel.: '+esc(String(s.customer.phone||'').replace(/\D/g,'').replace(/^55(?=\d{10,11}$)/,'').replace(/^(\d{2})(\d{4,5})(\d{4})$/,'($1) $2-$3'))+'</p>'+
     (del?'<p class="big">'+esc(s.address)+'</p><p>Bairro: '+esc(s.neighborhood)+'</p>':'')+'<hr>'+
     s.lines.map(function(l){return '<div class="it">'+r('<b>'+l.qty+'x '+esc(l.name)+'</b>',money(l.total))+
@@ -523,9 +533,9 @@ function renderOrders(){
 function cardHTML(o){
   var s=o.snapshot, nx=nextStages(o).filter(function(n){return n!=='cancelled'})[0], blocked=!o.fee_approved;
   var items=s.lines.map(function(l){return l.qty+'× '+esc(l.name)}).join(' · ');
-  return '<article class="ocard" data-s="'+o.status+'">'+
+  return '<article class="ocard" data-s="'+o.status+'">'+typeBanner(s)+
     '<div class="head"><h3>'+esc(o.number)+'</h3><span class="when">'+ago(o.created)+'</span></div>'+
-    '<div class="pills"><span class="pill p-'+o.status+'">'+stageNames[o.status]+'</span><span class="pill">'+(s.mode==='delivery'?'Entrega':'Retirada')+'</span><span class="pill p-'+o.payment+'">'+payNames[o.payment]+'</span></div>'+
+    '<div class="pills"><span class="pill p-'+o.status+'">'+stageNames[o.status]+'</span><span class="pill p-'+o.payment+'">'+payNames[o.payment]+'</span></div>'+
     '<div><div class="who">'+esc(s.customer.name)+'</div>'+(s.mode==='delivery'?'<div class="muted" style="font-size:13.5px">'+esc(s.neighborhood)+'</div>':'')+'</div>'+
     '<div class="items">'+items+'</div>'+
     (blocked&&s.mode==='delivery'&&o.status==='received'?'<div class="hint">'+(o.fee===null?'Defina o frete para liberar o preparo':'Aguardando o cliente aceitar o frete')+'</div>':'')+
@@ -575,7 +585,7 @@ function waText(o){
   var msg={
     received:'Recebemos seu pedido '+num+' aqui no Léo! Já já começamos o preparo.'+(del&&o.fee!=null&&!o.fee_approved?' A taxa de entrega é '+money(o.fee)+'; é só aceitar na página do pedido.':''),
     preparing:'Seu pedido '+num+' já está na chapa! 🍔',
-    ready:del?'Seu pedido '+num+' está pronto e já vai sair para entrega.':'Seu pedido '+num+' está pronto! Pode vir buscar na Av. Visconde do Rio Grande, 1451. 😋',
+    ready:del?'Seu pedido '+num+' está pronto e já vai sair para entrega.':s.mode==='dine_in'?'Seu pedido '+num+' está pronto! Já vamos servir'+(tableOf(s)?' na mesa '+tableOf(s):'')+'. 😋':'Seu pedido '+num+' está pronto! Pode vir buscar na Av. Visconde do Rio Grande, 1451. 😋',
     out_for_delivery:'Seu pedido '+num+' saiu para entrega! 🛵 Total: '+money(total(o))+'.',
     completed:'Obrigado por pedir no Léo! Esperamos que tenha gostado. Até a próxima! 🧡',
     cancelled:'Seu pedido '+num+' foi cancelado'+(reasonOf(o)?': '+reasonOf(o).replace(/[.!]+$/,''):'')+'. Desculpe pelo transtorno. Qualquer dúvida, é só responder aqui.'}[o.status];
@@ -583,11 +593,11 @@ function waText(o){
 }
 function drawOrder(keepOpen){
   var o=cur.o,s=o.snapshot;
-  var body='<div class="pills"><span class="pill p-'+o.status+'">'+stageNames[o.status]+'</span><span class="pill">'+(s.mode==='delivery'?'Entrega':'Retirada')+'</span><span class="pill p-'+o.payment+'">'+payNames[o.payment]+'</span></div>'+
+  var body=typeBanner(s)+'<div class="pills"><span class="pill p-'+o.status+'">'+stageNames[o.status]+'</span><span class="pill p-'+o.payment+'">'+payNames[o.payment]+'</span></div>'+
     (o.status==='cancelled'&&reasonOf(o)?'<p class="note">Motivo do cancelamento: '+esc(reasonOf(o))+'</p>':'')+
-    '<div class="box"><h3>Cliente</h3><p><b>'+esc(s.customer.name)+'</b> · <span class="num">'+esc(s.customer.phone)+'</span></p>'+(s.mode==='delivery'?'<p>'+esc(s.address)+' — '+esc(s.neighborhood)+'</p>':'<p class="muted">Retira no balcão</p>')+'<p class="muted" style="font-size:13px">Feito em '+fmtDate.format(new Date(o.created))+'</p></div>'+
+    '<div class="box"><h3>Cliente</h3><p><b>'+esc(s.customer.name)+'</b> · <span class="num">'+esc(s.customer.phone)+'</span></p>'+(s.mode==='delivery'?'<p>'+esc(s.address)+' — '+esc(s.neighborhood)+'</p>':s.mode==='dine_in'?'<p class="muted">Come no restaurante'+(tableOf(s)?' · mesa '+esc(tableOf(s)):'')+'</p>':'<p class="muted">Retira no balcão (para levar)</p>')+'<p class="muted" style="font-size:13px">Feito em '+fmtDate.format(new Date(o.created))+'</p></div>'+
     '<div class="box"><h3>Itens</h3><div class="lines">'+s.lines.map(function(l){return '<div class="line"><b>'+l.qty+'× '+esc(l.name)+'</b><span class="num">'+money(l.total)+'</span>'+(l.extras&&l.extras.length?'<small>+ '+l.extras.map(function(x){return esc(x.name)}).join(', ')+'</small>':'')+(l.note?'<small>Obs.: '+esc(l.note)+'</small>':'')+'</div>'}).join('')+'</div>'+(s.notes?'<p class="note" style="margin-top:6px">Obs. do pedido: '+esc(s.notes)+'</p>':'')+'</div>'+
-    '<div class="box totals"><div><span>Produtos</span><span>'+money(s.subtotal)+'</span></div><div><span>Entrega</span><span>'+(s.mode==='pickup'?'—':money(o.fee))+'</span></div><div class="big"><span>Total</span><span>'+(o.fee===null&&s.mode==='delivery'?'a definir':money(total(o)))+'</span></div></div>';
+    '<div class="box totals"><div><span>Produtos</span><span>'+money(s.subtotal)+'</span></div><div><span>Entrega</span><span>'+(s.mode!=='delivery'?'—':money(o.fee))+'</span></div><div class="big"><span>Total</span><span>'+(o.fee===null&&s.mode==='delivery'?'a definir':money(total(o)))+'</span></div></div>';
   if(s.mode==='delivery'&&!o.fee_approved)body+='<p class="note">'+(o.fee===null?'Informe o frete abaixo. O cliente aceita o valor no acompanhamento e só então o preparo é liberado.':'Frete de '+money(o.fee)+' enviado. Aguardando o cliente aceitar.')+'</p>';
   if(s.mode==='delivery'&&o.status==='received'&&o.payment==='pending')body+='<div class="box"><h3>Frete</h3><div style="display:flex;gap:8px"><div class="price-in" style="flex:1"><span>R$</span><input type="number" id="feeIn" min="0" max="10000" step="0.50" inputmode="decimal" value="'+(o.fee==null?'':(o.fee/100).toFixed(2))+'"></div><button class="btn" data-act="fee">Enviar frete</button></div></div>';
   var nx=nextStages(o),np=nextPays(o);
@@ -698,10 +708,10 @@ function renderSales(){
   list.forEach(function(o){
     o.snapshot.lines.forEach(function(l){var k=l.name;items[k]=items[k]||[k,0,0];items[k][1]+=l.qty;items[k][2]+=l.total||0});
     wd[new Date(localDay(o.created)+'T12:00:00').getDay()]++;var h=fmtHour.format(new Date(o.created));hr[h]=(hr[h]||0)+1});
-  var del=list.filter(function(o){return o.snapshot.mode==='delivery'}).length;
+  var del=list.filter(function(o){return o.snapshot.mode==='delivery'}).length,dine=list.filter(function(o){return o.snapshot.mode==='dine_in'}).length;
   $('salesStats').innerHTML=
     '<div class="stat"><span>Vendido</span><strong>'+money(sold)+'</strong><small>produtos + entrega</small></div>'+
-    '<div class="stat"><span>Pedidos</span><strong>'+list.length+'</strong><small>'+del+' entrega · '+(list.length-del)+' retirada</small></div>'+
+    '<div class="stat"><span>Pedidos</span><strong>'+list.length+'</strong><small>'+del+' entrega · '+(list.length-del-dine)+' para levar · '+dine+' no local</small></div>'+
     '<div class="stat"><span>Ticket médio</span><strong>'+(list.length?money(Math.round(sold/list.length)):'—')+'</strong><small>por pedido</small></div>'+
     '<div class="stat"><span>Itens vendidos</span><strong>'+Object.keys(items).reduce(function(s,k){return s+items[k][1]},0)+'</strong><small>'+Object.keys(items).length+' produtos diferentes</small></div>';
   var top=Object.keys(items).map(function(k){return items[k]}).sort(function(a,b){return b[1]-a[1]||b[2]-a[2]}).slice(0,10);
@@ -718,7 +728,7 @@ $('csvBtn').addEventListener('click',function(){
   var cents=function(c){return c==null?'':(c/100).toFixed(2).replace('.',',')};
   var rows=[['Pedido','Data','Hora','Cliente','Telefone','Modo','Bairro','Andamento','Pagamento','Forma','Produtos','Frete','Total','Itens']];
   salesList.slice().sort(function(a,b){return new Date(a.created)-new Date(b.created)}).forEach(function(o){var s=o.snapshot,d=new Date(o.created);
-    rows.push([o.number,new Intl.DateTimeFormat('pt-BR',{timeZone:'America/Sao_Paulo',dateStyle:'short'}).format(d),fmtTime.format(d),s.customer.name,s.customer.phone,s.mode==='delivery'?'Entrega':'Retirada',s.neighborhood||'',stageNames[o.status],payNames[o.payment],payMethod(o),cents(s.subtotal),cents(o.fee),cents(total(o)),s.lines.map(function(l){return l.qty+'x '+l.name}).join(' | ')])});
+    rows.push([o.number,new Intl.DateTimeFormat('pt-BR',{timeZone:'America/Sao_Paulo',dateStyle:'short'}).format(d),fmtTime.format(d),s.customer.name,s.customer.phone,modeName(s)+(tableOf(s)?' (mesa '+tableOf(s)+')':''),s.neighborhood||'',stageNames[o.status],payNames[o.payment],payMethod(o),cents(s.subtotal),cents(o.fee),cents(total(o)),s.lines.map(function(l){return l.qty+'x '+l.name}).join(' | ')])});
   var csv='\ufeff'+rows.map(function(r){return r.map(q).join(';')}).join('\r\n');
   var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download='vendas-leo-'+localDay(new Date())+'.csv';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1000);
 });
