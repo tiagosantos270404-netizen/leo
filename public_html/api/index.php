@@ -63,6 +63,14 @@ function body(): array {
     return $j;
 }
 function str($v, int $max): string { $s = trim(preg_replace('/\s+/u', ' ', (string) ($v ?? '')) ?? ''); return mb_substr($s, 0, $max); }
+/* bairro sem acento, minúsculo, sem a palavra "bairro" e sem espaços sobrando: "Bairro  Três Vendas" = "tres vendas" */
+function normBairro(string $s): string {
+    $s = mb_strtolower(trim($s));
+    $s = strtr($s, ['á'=>'a','à'=>'a','â'=>'a','ã'=>'a','ä'=>'a','é'=>'e','è'=>'e','ê'=>'e','ë'=>'e','í'=>'i','ì'=>'i','î'=>'i','ï'=>'i',
+        'ó'=>'o','ò'=>'o','ô'=>'o','õ'=>'o','ö'=>'o','ú'=>'u','ù'=>'u','û'=>'u','ü'=>'u','ç'=>'c','ñ'=>'n']);
+    $s = preg_replace('/^bairro\s+/u', '', $s) ?? $s;
+    return trim(preg_replace('/\s+/u', ' ', $s) ?? $s);
+}
 function cents($v, int $max = 1000000): int { if (!is_numeric($v)) fail(422, 'Valor inválido.'); $n = (int) round((float) $v); if ($n < 0 || $n > $max) fail(422, 'Valor fora do limite.'); return $n; }
 function hmac(string $msg): string { global $CFG; return hash_hmac('sha256', $msg, $CFG['secret']); }
 function ip(): string { return substr($_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '?', 0, 60); }
@@ -185,9 +193,10 @@ function compute(array $in, array $s): array {
     }
     $fee = $mode === 'pickup' ? 0 : null;
     if ($mode === 'delivery') {
-        $rule = null; foreach ($s['deliveryRules'] as $r) if (mb_strtolower($r['neighborhood']) === mb_strtolower($nb)) $rule = $r;
+        $rule = null;
+        foreach ($s['deliveryRules'] as $r) if (normBairro($r['neighborhood']) === normBairro($nb) && (!$rule || $r['available'])) $rule = $r;
         if (!empty($s['restrictDelivery']) && (!$rule || !$rule['available'])) fail(409, "Ainda não entregamos no bairro $nb. Fale com a gente no WhatsApp.");
-        if ($rule && $rule['available']) $fee = $rule['fee'];
+        if ($rule && $rule['available']) { $fee = $rule['fee']; $nb = $rule['neighborhood']; }
     }
     return ['mode' => $mode, 'customer' => ['name' => $name, 'phone' => $phone], 'address' => $address, 'neighborhood' => $nb,
         'notes' => str($in['notes'] ?? '', 600), 'lines' => $lines, 'subtotal' => $sub, 'fee' => $fee];

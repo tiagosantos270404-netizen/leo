@@ -403,7 +403,9 @@ function applyCatalog(c){
   live.accepting=c.acceptingOrders!==false;live.pickup=c.pickupEnabled!==false;live.delivery=c.deliveryEnabled!==false;
   /* opcionais (precisam do servidor guardar e devolver estes campos, ver MELHORIAS-SERVIDOR.txt) */
   live.eta=c.eta||{};live.pix=!!(c.pix&&c.pix.key);
-  live.areas=(c.deliveryRules||[]).filter(function(r){return r.available!==false&&r.neighborhood}).map(function(r){return r.neighborhood});
+  var rules=(c.deliveryRules||[]).filter(function(r){return r.available!==false&&r.neighborhood});
+  live.areas=rules.map(function(r){return r.neighborhood});
+  live.fees={};rules.forEach(function(r){live.fees[normBairro(r.neighborhood)]=r.fee==null?null:r.fee});
   live.restrict=!!c.restrictDelivery&&live.areas.length>0;
   live.hours=Array.isArray(c.hours)?c.hours.filter(function(h){return h&&h.open&&h.close}):[];live.hoursOn=!!c.hoursConfirmed&&live.hours.length>0;
   if(!live.delivery&&form.mode==='entrega')form.mode='retirada';if(!live.pickup&&form.mode==='retirada')form.mode='entrega';
@@ -531,10 +533,28 @@ $('bagBtn').addEventListener('click',openBag);$('cartbarBtn').addEventListener('
 $('bagBack').addEventListener('click',function(){step=step==='revisar'?'dados':'bag';renderBag()});
 
 function stepsHTML(){var s=['Sacola','Seus dados','Revisar'],i={bag:0,dados:1,revisar:2}[step];return '<div class="steps">'+s.map(function(t,k){return '<span class="'+(k<=i?'on':'')+'">'+t+'</span>'}).join('')+'</div>'}
+/* frete por bairro (cadastrado no painel). Comparação sem acento, maiúsculas nem a palavra "bairro", igual ao servidor */
+function normBairro(s){return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/^\s*bairro\s+/,'').replace(/\s+/g,' ').trim()}
+function knownFee(b){var k=normBairro(b);return k&&live.fees&&Object.prototype.hasOwnProperty.call(live.fees,k)?live.fees[k]:undefined}
 function sumHTML(){
   var h='<div class="sum"><div><span>Subtotal</span><span>'+money(subtotal())+'</span></div>';
-  if(form.mode==='entrega')h+='<div class="muted"><span>Taxa de entrega</span><span>a confirmar no WhatsApp</span></div>';
-  return h+'<div class="tot"><span>Total</span><span>'+money(subtotal())+(form.mode==='entrega'?' + taxa':'')+'</span></div></div>';
+  var fee=form.mode==='entrega'?knownFee(form.bairro):0;
+  if(form.mode==='entrega')h+=fee!=null?'<div><span>Taxa de entrega</span><span>'+money(fee)+'</span></div>':'<div class="muted"><span>Taxa de entrega</span><span>'+(form.bairro.trim()?'o restaurante informa':'escolha o bairro')+'</span></div>';
+  return h+'<div class="tot"><span>Total</span><span>'+money(subtotal()+(fee||0))+(form.mode==='entrega'&&fee==null?' + taxa':'')+'</span></div></div>';
+}
+function bairroHTML(){
+  if(!live.areas||!live.areas.length)return '<div class="field"><label for="fBairro">Bairro</label><input id="fBairro" type="text" value="'+esc(form.bairro)+'"><span class="err" id="eBairro" hidden>Informe o bairro.</span></div>';
+  var match=live.areas.find(function(a){return normBairro(a)===normBairro(form.bairro)});
+  var outro=!live.restrict&&!match&&(form.bairroOutro||form.bairro.trim()!=='');
+  var fee=match?knownFee(match):undefined;
+  return '<div class="field"><label for="fBairroSel">Bairro'+(live.restrict?' <small>entregamos nestes bairros</small>':'')+'</label>'+
+    '<select class="inp" id="fBairroSel"><option value="">Escolha o bairro…</option>'+live.areas.map(function(a){var f=knownFee(a);return '<option value="'+esc(a)+'"'+(a===match?' selected':'')+'>'+esc(a)+(f!=null?' — frete '+money(f):'')+'</option>'}).join('')+
+    (live.restrict?'':'<option value="__outro"'+(outro?' selected':'')+'>Outro bairro</option>')+'</select>'+
+    (outro?'<input id="fBairro" type="text" placeholder="Digite o nome do bairro" value="'+esc(form.bairro)+'" aria-label="Nome do bairro">':'')+
+    (match?'<span class="hint">'+(fee!=null?'Frete para '+esc(match)+': <b style="color:var(--carvao)">'+money(fee)+'</b>':'O restaurante informa o frete para este bairro.')+'</span>':
+      outro?'<span class="hint">Para outros bairros, o Léo informa o frete e você aceita antes do preparo.</span>':
+      live.restrict?'<span class="hint">Seu bairro não está na lista? Fale com a gente no WhatsApp.</span>':'')+
+    '<span class="err" id="eBairro" hidden>Escolha o bairro.</span></div>';
 }
 function renderBag(){
   var body=$('bagBody'),foot=$('bagFoot');$('bagBack').hidden=(step==='bag'||step==='enviado');
@@ -555,10 +575,7 @@ function renderBag(){
     '<div class="field"><span class="lbl">Como prefere receber?</span><div class="seg" role="group">'+(live.delivery?'<button data-mode="entrega" aria-pressed="'+(form.mode==='entrega')+'">Entrega</button>':'')+(live.pickup?'<button data-mode="retirada" aria-pressed="'+(form.mode==='retirada')+'">Retirar no local</button>':'')+'</div></div>'+
     (etaText(form.mode)?'<p class="hint">Tempo estimado: <b style="color:var(--carvao)">'+esc(etaText(form.mode))+'</b></p>':'')+
     (form.mode==='entrega'?
-      '<div class="field"><label for="fBairro">Bairro'+(live.restrict?' <small>entregamos nestes bairros</small>':live.areas.length?' <small>toque para ver a lista</small>':'')+'</label>'+
-      (live.restrict?'<select class="inp" id="fBairro"><option value="">Escolha o bairro…</option>'+live.areas.map(function(a){return '<option'+(a===form.bairro?' selected':'')+'>'+esc(a)+'</option>'}).join('')+'</select>'
-        :'<input id="fBairro" type="text" list="areasList" value="'+esc(form.bairro)+'"><datalist id="areasList">'+live.areas.map(function(a){return '<option value="'+esc(a)+'">'}).join('')+'</datalist>')+
-      (live.restrict?'<span class="hint">Seu bairro não está na lista? Fale com a gente no WhatsApp.</span>':'')+'<span class="err" id="eBairro" hidden>Informe o bairro.</span></div>'+
+      bairroHTML()+
       '<div class="field"><label for="fAddr">Endereço e número <small>com ponto de referência</small></label><input id="fAddr" type="text" autocomplete="street-address" value="'+esc(form.address)+'"><span class="err" id="eAddr" hidden>Informe o endereço para a entrega.</span></div>'
       :'<p style="color:var(--muted);font-size:14.5px">Retire em: Av. Visconde do Rio Grande, 1451, Centro.</p>')+
     '<div class="field"><span class="lbl">Pagamento <small>'+(live.pix&&live.on?'Pix: pague pelo site depois de confirmar':'na entrega ou retirada')+'</small></span><div class="pays" role="group">'+['Pix','Cartão','Dinheiro'].map(function(p){return '<button data-pay="'+p+'" aria-pressed="'+(form.pay===p)+'">'+p+'</button>'}).join('')+'</div></div>'+
@@ -589,7 +606,9 @@ function readForm(){
   var g=function(id){var el=$(id);return el?el.value:null};
   if(g('fName')!==null)form.name=g('fName');
   if(g('fPhone')!==null)form.phone=g('fPhone');
-  if(g('fBairro')!==null)form.bairro=g('fBairro');
+  var sel=g('fBairroSel');
+  if(sel!==null){form.bairroOutro=sel==='__outro';if(sel!=='__outro')form.bairro=sel;else if(g('fBairro')!==null)form.bairro=g('fBairro')}
+  else if(g('fBairro')!==null)form.bairro=g('fBairro');
   if(g('fAddr')!==null)form.address=g('fAddr');
   if(g('fTroco')!==null)form.troco=g('fTroco');  if(g('fNotes')!==null)form.notes=g('fNotes');
   persist();
@@ -599,7 +618,7 @@ function validate(){
   function chk(id,eid,bad){var el=$(id);if(!el)return;el.classList.toggle('invalid',bad);$(eid).hidden=!bad;if(bad&&ok){el.focus();ok=false}}
   chk('fName','eName',!form.name.trim());
   if(live.on)chk('fPhone','ePhone',String(form.phone||'').replace(/\D/g,'').length<10);
-  if(form.mode==='entrega'){chk('fBairro','eBairro',!form.bairro.trim());chk('fAddr','eAddr',!form.address.trim())}
+  if(form.mode==='entrega'){if($('fBairroSel'))chk('fBairroSel','eBairro',!$('fBairroSel').value);chk('fBairro','eBairro',!form.bairro.trim());chk('fAddr','eAddr',!form.address.trim())}
   return ok;
 }
 function message(){
@@ -667,7 +686,9 @@ function showAgain(){var l=lastOrder(),b=$('againBtn');b.hidden=!l.length||cart.
 $('againBtn').addEventListener('click',function(){var l=lastOrder();if(!l.length)return;
   var all=(function(){try{return JSON.parse(localStorage.getItem('xleo-ultimo-pedido')).lines.length}catch(e){return l.length}})();
   cart=l;persist();refresh();step='bag';openBag();if(all>l.length)toast('Alguns itens do último pedido estão esgotados hoje')});
-$('bagSheet').addEventListener('input',readForm);$('bagSheet').addEventListener('change',function(e){if(e.target.tagName==='SELECT')readForm()});
+$('bagSheet').addEventListener('input',readForm);$('bagSheet').addEventListener('change',function(e){
+  if(e.target.id==='fBairroSel'){readForm();if(e.target.value==='__outro'){form.bairroOutro=true;form.bairro=''}persist();renderBag();var t=$('fBairro')||$('fBairroSel');if(t)t.focus();return}
+  if(e.target.tagName==='SELECT')readForm()});
 $('bagSheet').addEventListener('click',function(e){
   var t=e.target.closest('button,a');if(!t)return;
   if(t.dataset.inc!==undefined){cart[+t.dataset.inc].qty++;persist();refresh();renderBag();return}
