@@ -251,7 +251,7 @@ try {
     }
 
     if ($path === 'quote' && $method === 'POST') {
-        $b = body(); limit('quote', 120, 3600);
+        $b = body(); limit('quote', 600, 3600);
         $q = compute($b, settings()); $exp = time() + 1800;
         out(['subtotal' => $q['subtotal'], 'fee' => $q['fee'], 'total' => $q['fee'] === null ? null : $q['subtotal'] + $q['fee'], 'signature' => quoteSig($q, $exp)]);
     }
@@ -260,7 +260,7 @@ try {
         $key = str($b['key'] ?? '', 64); if ($key === '') fail(422, 'Pedido sem identificador.');
         $st = db()->prepare('SELECT id, data FROM orders WHERE idem=?'); $st->execute([$key]);
         if ($r = $st->fetch()) { $o = json_decode($r['data'], true); out(['id' => $o['id'], 'number' => $o['number'], 'token' => orderToken($o['id']), 'created' => $o['created']]); }
-        limit('order', 15, 3600);
+        limit('order', 60, 3600); // por conexão: operadoras de celular põem muitos clientes no mesmo IP
         $q = compute($b, settings());
         $sig = (string) ($b['quote'] ?? ''); $exp = (int) explode('.', $sig)[0];
         if ($exp < time() || !hash_equals(quoteSig($q, $exp), $sig)) fail(409, 'Os valores do pedido mudaram. Volte e revise o pedido.');
