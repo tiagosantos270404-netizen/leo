@@ -90,17 +90,41 @@ function settings(bool $lock = false): array {
     $s = json_decode($row['data'], true); $s['version'] = (int) $row['version'];
     return $s;
 }
-function isOpenNow(array $s): bool {
-    if (empty($s['hoursConfirmed']) || empty($s['hours'])) return true;
-    $now = new DateTime('now', new DateTimeZone(TZ));
-    $day = (int) $now->format('w'); $min = (int) $now->format('G') * 60 + (int) $now->format('i'); $y = ($day + 6) % 7;
-    foreach ($s['hours'] as $h) {
-        [$oh, $om] = array_map('intval', explode(':', $h['open'])); [$ch, $cm] = array_map('intval', explode(':', $h['close']));
-        $o = $oh * 60 + $om; $c = $ch * 60 + $cm;
-        if ($c > $o) { if ($h['day'] === $day && $min >= $o && $min < $c) return true; }
-        else if (($h['day'] === $day && $min >= $o) || ($h['day'] === $y && $min < $c)) return true;
-    }
-    return false;
+/* ---------- horários (definidos em horarios.php, sempre pela hora do servidor) ---------- */
+function schedule(): array { static $h = null; return $h ??= require __DIR__ . '/horarios.php'; }
+function nowLocal(): DateTimeImmutable {
+    global $CFG; $tz = new DateTimeZone(schedule()['fuso'] ?? TZ);
+    // test_now só existe no config.php de testes; em produção vale a hora real do servidor
+    return new DateTimeImmutable(isset($CFG['test_now']) ? (string) $CFG['test_now'] : 'now', $tz);
+}
+function hm(string $t): int { [$h, $m] = array_map('intval', explode(':', $t) + [0, 0]); return $h * 60 + $m; }
+function inWindow(array $days, string $from, string $to, DateTimeImmutable $n): bool {
+    $min = (int) $n->format('G') * 60 + (int) $n->format('i');
+    return in_array((int) $n->format('w'), array_map('intval', $days), true) && $min >= hm($from) && $min < hm($to);
+}
+function isOpenNow(): bool { $h = schedule(); return inWindow($h['dias'], $h['abre'], $h['fecha'], nowLocal()); }
+function isDeliveryOpenNow(): bool {
+    $h = schedule(); $n = nowLocal();
+    return inWindow($h['dias'], $h['abre'], $h['fecha'], $n) && inWindow($h['entrega_dias'] ?? $h['dias'], $h['entrega_inicio'], $h['entrega_fim'], $n);
+}
+/* [1,2,3,4,5,6] -> "segunda a sábado" (ou "Seg a Sáb" no formato curto) */
+function diasTexto(array $d, bool $curto): string {
+    $nomes = $curto ? ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'] : ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+    $d = array_values(array_unique(array_map('intval', $d))); sort($d);
+    if (count($d) === 7) return $curto ? 'Todos os dias' : 'todos os dias';
+    if (count($d) >= 3 && $d[count($d) - 1] - $d[0] === count($d) - 1) return $nomes[$d[0]] . ' a ' . $nomes[$d[count($d) - 1]];
+    $n = array_map(fn($i) => $nomes[$i], $d);
+    return count($n) > 1 ? implode(', ', array_slice($n, 0, -1)) . ' e ' . end($n) : (string) ($n[0] ?? '');
+}
+function scheduleInfo(): array {
+    $h = schedule(); $ed = $h['entrega_dias'] ?? $h['dias'];
+    $sameDays = array_values(array_unique($ed)) == array_values(array_unique($h['dias']));
+    return [
+        'open' => isOpenNow(), 'deliveryOpen' => isDeliveryOpenNow(), 'serverTime' => nowLocal()->format('Y-m-d\TH:i:sP'),
+        'text' => diasTexto($h['dias'], true) . ' • Aberto das ' . $h['abre'] . ' às ' . $h['fecha'] . ' • Entregas ' . ($sameDays ? '' : diasTexto($ed, true) . ' ') . 'das ' . $h['entrega_inicio'] . ' às ' . $h['entrega_fim'],
+        'closedMsg' => 'Estamos fechados. Funcionamos de ' . diasTexto($h['dias'], false) . ', das ' . $h['abre'] . ' às ' . $h['fecha'] . '.',
+        'deliveryMsg' => 'Entregas de ' . diasTexto($ed, false) . ', das ' . $h['entrega_inicio'] . ' às ' . $h['entrega_fim'],
+    ];
 }
 function cleanSettings(array $in, array $old): array {
     $time = fn($t) => preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', (string) $t) ? (string) $t : fail(422, 'Horário inválido.');
@@ -166,10 +190,11 @@ function sessionInfo(): array {
 function orderToken(string $id): string { return substr(hmac("order.$id"), 0, 32); }
 function compute(array $in, array $s): array {
     if (empty($s['acceptingOrders'])) fail(409, 'O Léo não está recebendo pedidos pelo site agora. Fale pelo WhatsApp (51) 99620-0841.');
-    if (!isOpenNow($s)) fail(409, 'Estamos fechados agora. Confira o horário no site.');
+    if (!isOpenNow()) fail(409, scheduleInfo()['closedMsg']);
     /* tipo de pedido: delivery = entrega, pickup = retirar no balcão (para levar), dine_in = comer no restaurante */
     $mode = (string) ($in['mode'] ?? '');
     if (!in_array($mode, ['delivery', 'pickup', 'dine_in'], true)) fail(422, 'Escolha o tipo de pedido: entrega, para levar ou comer no restaurante.');
+    if ($mode === 'delivery' && !isDeliveryOpenNow()) fail(409, scheduleInfo()['deliveryMsg']);
     if ($mode === 'delivery' && empty($s['deliveryEnabled'])) fail(409, 'A entrega está pausada agora. Escolha outra opção.');
     if ($mode !== 'delivery' && empty($s['pickupEnabled'])) fail(409, 'O atendimento no balcão está pausado agora. Escolha entrega.');
     $table = $mode === 'dine_in' ? str($in['table'] ?? '', 10) : '';
@@ -250,7 +275,12 @@ try {
         $s = settings();
         out(['products' => $s['products'], 'acceptingOrders' => $s['acceptingOrders'], 'pickupEnabled' => $s['pickupEnabled'], 'deliveryEnabled' => $s['deliveryEnabled'],
             'eta' => $s['eta'], 'pix' => $s['pix'], 'deliveryRules' => $s['deliveryRules'], 'restrictDelivery' => $s['restrictDelivery'],
-            'hours' => $s['hours'], 'hoursConfirmed' => $s['hoursConfirmed'], 'open' => isOpenNow($s)]);
+            'schedule' => scheduleInfo()]);
+    }
+    /* situação de agora (aberto / entrega), consultada pela loja a cada minuto */
+    if ($path === 'status' && $method === 'GET') {
+        $s = settings();
+        out(['acceptingOrders' => $s['acceptingOrders'], 'pickupEnabled' => $s['pickupEnabled'], 'deliveryEnabled' => $s['deliveryEnabled'], 'schedule' => scheduleInfo()]);
     }
     if ($path === 'settings' && $method === 'GET') { requireAdmin(); out(settings()); }
     if ($path === 'settings' && $method === 'PUT') {

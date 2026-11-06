@@ -229,8 +229,12 @@ select.inp{min-height:50px;appearance:auto}
 .modes button small{display:block;color:var(--muted);font-size:13px;font-weight:500}
 .modes button[aria-checked="true"]{border-color:var(--cor-primaria);background:rgba(247,147,30,.12)}
 .modes button[aria-checked="true"] b,.modes button[aria-checked="true"] svg{color:var(--cor-primaria)}
-.modes button:hover{border-color:var(--cor-primaria)}
-.modes.invalid button{border-color:var(--erro)}
+.modes button:not(:disabled):hover{border-color:var(--cor-primaria)}
+.modes.invalid button:not(:disabled){border-color:var(--erro)}
+.modes button:disabled{cursor:not-allowed;background:var(--surface-2);border-color:var(--line);color:var(--muted);filter:grayscale(1);opacity:.6}
+.modes button:disabled b{color:var(--muted)}
+.modes button:disabled small{color:var(--cor-texto-secundario)}
+.sched{font-size:14px;font-weight:600;color:var(--cor-primaria);letter-spacing:.01em}
 .pays{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .pays button{min-height:48px;border-radius:12px;border:1.5px solid var(--line);background:var(--surface);font-weight:600;cursor:pointer}
 .pays button[aria-pressed="true"]{border-color:var(--brasa);color:var(--brasa);background:var(--surface-2)}
@@ -272,6 +276,7 @@ select.inp{min-height:50px;appearance:auto}
     <button class="again" id="againBtn" hidden><span>Pedir de novo</span><small id="againText"></small></button>
     <p class="paused-hero" id="closedBanner" hidden></p>
     <p class="paused-hero" id="pausedBanner" hidden>Pedidos pelo site pausados no momento. Fale com a gente no WhatsApp (51) 99620-0841.</p>
+    <p class="sched" id="schedLine" hidden></p>
     <div class="info"><span id="etaInfo">Entrega ou retirada</span><span>Centro · Barra do Ribeiro</span><span>Pix, cartão ou dinheiro</span></div>
     <div class="search">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -399,7 +404,7 @@ function lineDesc(l){return extrasOf(l).map(function(x){return '+ '+x.name}).con
    No domínio do restaurante a loja lê o cardápio de /api/catalog (preços, disponibilidade e adicionais
    definidos no painel) e, com o cliente conectado, envia o pedido para /api/orders. Fora dele, usa o
    cardápio embutido acima e o pedido segue pelo WhatsApp. */
-var live={on:false,user:false,accepting:true,pickup:true,delivery:true,eta:{},pix:false,areas:[],restrict:false,hours:[],hoursOn:false};
+var live={on:false,user:false,accepting:true,pickup:true,delivery:true,eta:{},pix:false,areas:[],restrict:false,sched:null};
 async function apiCall(path,body){
   var r=await fetch('/api/'+path,{method:body?'POST':'GET',cache:'no-store',credentials:'same-origin',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});
   var d;try{d=await r.json()}catch(e){throw Error('O servidor não respondeu. Tente novamente.')}
@@ -416,38 +421,31 @@ function applyCatalog(c){
   live.areas=rules.map(function(r){return r.neighborhood});
   live.fees={};rules.forEach(function(r){live.fees[normBairro(r.neighborhood)]=r.fee==null?null:r.fee});
   live.restrict=!!c.restrictDelivery&&live.areas.length>0;
-  live.hours=Array.isArray(c.hours)?c.hours.filter(function(h){return h&&h.open&&h.close}):[];live.hoursOn=!!c.hoursConfirmed&&live.hours.length>0;
+  if(c.schedule)live.sched=c.schedule;
   /* opção pausada no painel: o cliente escolhe de novo */
-  if(!live.delivery&&form.mode==='entrega')form.mode='';if(!live.pickup&&(form.mode==='retirada'||form.mode==='local'))form.mode='';
+  fixMode();
   cart=cart.filter(function(l){return byId[l.id]&&byId[l.id].available&&groups[byId[l.id].group]});
 }
 
-/* ---------- horário de funcionamento (definido no painel, horário de Brasília) ---------- */
-var WD=['domingo','segunda','terça','quarta','quinta','sexta','sábado'];
-function nowSP(){var parts={};new Intl.DateTimeFormat('en-US',{timeZone:'America/Sao_Paulo',weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date()).forEach(function(x){parts[x.type]=x.value});
-  return {day:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].indexOf(parts.weekday),min:(+parts.hour%24)*60+(+parts.minute)}}
-function toMin(t){var a=String(t).split(':');return (+a[0])*60+(+a[1]||0)}
-function isOpen(){
-  if(!live.hoursOn)return true;var n=nowSP(),y=(n.day+6)%7;
-  return live.hours.some(function(h){var o=toMin(h.open),c=toMin(h.close);
-    if(c>o)return h.day===n.day&&n.min>=o&&n.min<c;
-    return (h.day===n.day&&n.min>=o)||(h.day===y&&n.min<c)});
-}
-function nextOpenText(){
-  var n=nowSP(),best=null;
-  live.hours.forEach(function(h){var o=toMin(h.open);for(var k=0;k<8;k++){var d=(n.day+k)%7;if(d!==h.day)continue;if(k===0&&o<=n.min)continue;var t=k*1440+o-n.min;if(best===null||t<best.t)best={t:t,k:k,d:d,o:h.open};break}});
-  if(!best)return '';return best.k===0?'hoje às '+best.o:best.k===1?'amanhã às '+best.o:WD[best.d]+' às '+best.o;
-}
+/* ---------- horário de funcionamento ----------
+   Quem decide se está aberto e se há entrega é o SERVIDOR (hora de Brasília, api/horarios.php),
+   nunca o relógio do celular. A loja só mostra o que o servidor responde e pergunta de novo a cada minuto. */
+function isOpen(){return !live.sched||live.sched.open!==false}            // sem servidor (pedido pelo WhatsApp) o restaurante confirma
+function deliveryOpen(){return !live.sched||live.sched.deliveryOpen!==false}
 function canOrder(){return live.accepting&&isOpen()}
-function closedMsg(){var nx=nextOpenText();return 'Estamos fechados agora'+(nx?'. Abrimos '+nx+'.':'.')+' Você pode olhar o cardápio à vontade.'}
+function closedMsg(){return live.sched&&live.sched.closedMsg||'Estamos fechados.'}
+function fixMode(){if(form.mode==='entrega'&&(!live.delivery||!deliveryOpen()))form.mode='';if(!live.pickup&&(form.mode==='retirada'||form.mode==='local'))form.mode=''}
 function showHours(){
   var b=$('closedBanner');b.hidden=!(live.accepting&&!isOpen());if(!b.hidden)b.textContent=closedMsg();
-  if(!live.hoursOn)return;
-  var byDay=[0,1,2,3,4,5,6].map(function(d){return live.hours.filter(function(h){return h.day===d}).sort(function(a,b){return toMin(a.open)-toMin(b.open)}).map(function(h){return h.open+'–'+h.close}).join(', ')});
-  var order=[1,2,3,4,5,6,0],rows=[],i=0;
-  while(i<7){var j=i;while(j+1<7&&byDay[order[j+1]]===byDay[order[i]])j++;var cap=function(s){return s.charAt(0).toUpperCase()+s.slice(1)};
-    rows.push('<b>'+cap(WD[order[i]].slice(0,3))+(j>i?' a '+WD[order[j]].slice(0,3):'')+'</b> '+(byDay[order[i]]?esc(byDay[order[i]]):'fechado'));i=j+1}
-  $('footHours').innerHTML=rows.join('<br>');
+  $('pausedBanner').hidden=live.accepting;
+  if(live.sched&&live.sched.text){$('schedLine').textContent=live.sched.text;$('schedLine').hidden=false;$('footHours').textContent=live.sched.text}
+}
+async function pollStatus(){
+  try{var st=await apiCall('status')}catch(e){return}
+  var before=JSON.stringify([live.accepting,live.pickup,live.delivery,isOpen(),deliveryOpen()]);
+  live.accepting=st.acceptingOrders!==false;live.pickup=st.pickupEnabled!==false;live.delivery=st.deliveryEnabled!==false;if(st.schedule)live.sched=st.schedule;
+  showHours();
+  if(before!==JSON.stringify([live.accepting,live.pickup,live.delivery,isOpen(),deliveryOpen()])&&openSheet===$('bagSheet')&&(step==='bag'||step==='dados')){readForm();fixMode();persist();renderBag()}
 }
 
 /* ---------- cardápio ---------- */
@@ -538,7 +536,7 @@ $('itAdd').addEventListener('click',function(){
 
 /* ---------- sacola e finalização ---------- */
 var step='bag'; // bag | dados | revisar | enviado
-function openBag(){if(step!=='enviado')step='bag';renderBag();show($('bagSheet'))}
+function openBag(){if(step!=='enviado')step='bag';renderBag();show($('bagSheet'));if(live.on)pollStatus()}
 $('bagBtn').addEventListener('click',openBag);$('cartbarBtn').addEventListener('click',openBag);
 $('bagBack').addEventListener('click',function(){step=step==='revisar'?'dados':'bag';renderBag()});
 
@@ -553,10 +551,12 @@ var MODES=[
   ['local','Comer no restaurante','Sem taxa de entrega','<path d="M7 3v8M5 3v4a2 2 0 0 0 4 0V3M7 11v10M17 3c-2 0-3 2-3 6h3v12"/>']];
 function modesHTML(){
   var opts=MODES.filter(function(m){return m[0]==='entrega'?live.delivery:live.pickup});
+  /* fora do horário de entrega (informado pelo servidor), "Entrega" aparece desativada com o aviso */
+  var off=function(m){return m[0]==='entrega'&&!deliveryOpen()},first=opts.filter(function(m){return !off(m)})[0];
   return '<div class="field"><span class="lbl" id="modeLbl">Como você quer o pedido?</span><div class="modes" id="fModes" role="radiogroup" aria-labelledby="modeLbl">'+
-    opts.map(function(m){var on=form.mode===m[0];return '<button type="button" role="radio" data-mode="'+m[0]+'" aria-checked="'+on+'" tabindex="'+(on||(!form.mode&&m===opts[0])?0:-1)+'">'+
+    opts.map(function(m){var on=form.mode===m[0],dis=off(m);return '<button type="button" role="radio" data-mode="'+m[0]+'" aria-checked="'+on+'"'+(dis?' disabled aria-disabled="true"':'')+' tabindex="'+(!dis&&(on||(!form.mode&&m===first))?0:-1)+'">'+
       '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+m[3]+'</svg>'+
-      '<span><b>'+m[1]+'</b><small>'+m[2]+'</small></span></button>'}).join('')+
+      '<span><b>'+m[1]+'</b><small>'+(dis?esc(live.sched&&live.sched.deliveryMsg||'Entrega indisponível agora'):m[2])+'</small></span></button>'}).join('')+
     '</div><span class="err" id="eMode" hidden>Escolha uma opção para continuar.</span></div>';
 }
 function sumHTML(){
@@ -644,9 +644,9 @@ function validate(){
   function chk(id,eid,bad){var el=$(id);if(!el)return;el.classList.toggle('invalid',bad);$(eid).hidden=!bad;if(bad&&ok){el.focus();ok=false}}
   chk('fName','eName',!form.name.trim());
   if(live.on)chk('fPhone','ePhone',String(form.phone||'').replace(/\D/g,'').length<10);
-  var badMode=!MODES.some(function(m){return m[0]===form.mode&&$('fModes').querySelector('[data-mode="'+m[0]+'"]')});
+  var badMode=!MODES.some(function(m){return m[0]===form.mode&&$('fModes').querySelector('[data-mode="'+m[0]+'"]:not(:disabled)')});
   $('fModes').classList.toggle('invalid',badMode);$('eMode').hidden=!badMode;
-  if(badMode&&ok){$('fModes').querySelector('button').focus();ok=false}
+  if(badMode&&ok){var fb=$('fModes').querySelector('button:not(:disabled)');if(fb)fb.focus();ok=false}
   if(form.mode==='entrega'){if($('fBairroSel'))chk('fBairroSel','eBairro',!$('fBairroSel').value);chk('fBairro','eBairro',!form.bairro.trim());chk('fAddr','eAddr',!form.address.trim())}
   return ok;
 }
@@ -718,7 +718,7 @@ $('againBtn').addEventListener('click',function(){var l=lastOrder();if(!l.length
   cart=l;persist();refresh();step='bag';openBag();if(all>l.length)toast('Alguns itens do último pedido estão esgotados hoje')});
 $('bagSheet').addEventListener('input',readForm);$('bagSheet').addEventListener('keydown',function(e){
   var b=e.target.closest&&e.target.closest('#fModes [data-mode]');if(!b||['ArrowDown','ArrowRight','ArrowUp','ArrowLeft'].indexOf(e.key)<0)return;
-  e.preventDefault();var all=[].slice.call($('fModes').querySelectorAll('[data-mode]')),i=all.indexOf(b),n=all[(i+(e.key==='ArrowDown'||e.key==='ArrowRight'?1:all.length-1))%all.length];n.click()});
+  e.preventDefault();var all=[].slice.call($('fModes').querySelectorAll('[data-mode]:not(:disabled)')),i=all.indexOf(b),n=all[(i+(e.key==='ArrowDown'||e.key==='ArrowRight'?1:all.length-1))%all.length];n.click()});
 $('bagSheet').addEventListener('change',function(e){
   if(e.target.id==='fBairroSel'){readForm();if(e.target.value==='__outro'){form.bairroOutro=true;form.bairro=''}persist();renderBag();var t=$('fBairro')||$('fBairroSel');if(t)t.focus();return}
   if(e.target.tagName==='SELECT')readForm()});
@@ -758,8 +758,7 @@ renderMenu();refresh();spy();
 if(CNPJ||RAZAO_SOCIAL){$('footLegal').hidden=false;$('footLegal').textContent=[RAZAO_SOCIAL,CNPJ?'CNPJ '+CNPJ:''].filter(Boolean).join(' · ')+' · Av. Visconde do Rio Grande, 1451, Centro, Barra do Ribeiro/RS'}
 (async function(){
   try{var r=await Promise.all([apiCall('catalog'),apiCall('session').catch(function(){return {}})])}catch(e){return}
-  live.on=true;live.user=!!(r[1]&&r[1].user);applyCatalog(r[0]);persist();renderMenu();refresh();spy();showTrack();showEta();showHours();setInterval(showHours,60000);
-  if(!live.accepting){$('pausedBanner').hidden=false}
+  live.on=true;live.user=!!(r[1]&&r[1].user);applyCatalog(r[0]);persist();renderMenu();refresh();spy();showTrack();showEta();showHours();setInterval(pollStatus,60000);
 })();
 })();
 </script>

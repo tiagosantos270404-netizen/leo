@@ -1,4 +1,4 @@
 # só o index.php responde; config, cardápio inicial e marcadores ficam fechados
-<FilesMatch "^(config\.php|config\.example\.php|seed\.json|\.migrated.*)$">
+<FilesMatch "^(config\.php|config\.example\.php|horarios\.php|seed\.json|\.migrated.*)$">
   Require all denied
 </FilesMatch>

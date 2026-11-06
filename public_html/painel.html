@@ -318,9 +318,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--brasa);outline:none}
       </div>
       <div class="card">
         <h2>Horários</h2>
-        <div class="setrow"><span><b>Aplicar horários</b><small>Ligado: a loja só aceita pedidos nos períodos abaixo (horário de Brasília). Para fechar depois da meia-noite, use o fechamento menor que a abertura (ex.: 18:00 às 00:30).</small></span><label class="switch"><input type="checkbox" id="s-hoursConfirmed"><span class="track"></span></label></div>
-        <div id="hoursList" style="display:grid;gap:10px"></div>
-        <button type="button" class="btn btn-sm" id="addHour">+ Adicionar período</button>
+        <p id="schedNow" style="font-weight:700">Carregando…</p>
+        <p class="muted" id="schedText" style="font-size:14px"></p>
+        <p class="muted" style="font-size:13px">A loja e o servidor seguem esses horários pela hora do servidor (Brasília). Para mudar dias ou horários, edite o arquivo <b>api/horarios.php</b>.</p>
+        <!-- períodos antigos do painel: não são mais usados, ficam guardados sem efeito -->
+        <div hidden><input type="checkbox" id="s-hoursConfirmed"><div id="hoursList"></div><button type="button" id="addHour"></button></div>
       </div>
       <div class="card">
         <h2>Tempo estimado</h2>
@@ -415,7 +417,7 @@ function toast(m){var t=$('toast');t.textContent=m;t.hidden=false;clearTimeout(t
 
 /* ===== abas ===== */
 var tabs=document.querySelectorAll('.tab');
-function showTab(name){tabs.forEach(function(t){t.setAttribute('aria-selected',t.dataset.tab===name)});['orders','menu','sales','hours'].forEach(function(n){$('tab-'+n).hidden=n!==name});if(name==='sales')renderSales();
+function showTab(name){tabs.forEach(function(t){t.setAttribute('aria-selected',t.dataset.tab===name)});['orders','menu','sales','hours'].forEach(function(n){$('tab-'+n).hidden=n!==name});if(name==='sales')renderSales();if(name==='hours')loadSched();
   $('savebar').hidden=!(name==='menu'&&Object.keys(dirty).length);try{localStorage.setItem('xleo-painel-tab',name)}catch(e){}}
 tabs.forEach(function(t){t.addEventListener('click',function(){showTab(t.dataset.tab)})});
 
@@ -735,6 +737,13 @@ $('csvBtn').addEventListener('click',function(){
 $('salesChips').addEventListener('click',function(e){var c=e.target.closest('[data-period]');if(!c)return;salesPeriod=c.dataset.period;renderSales()});
 
 /* ===== funcionamento ===== */
+/* horários vêm do servidor (api/horarios.php), sempre pela hora do servidor */
+async function loadSched(){
+  try{var st=await api('status'),sc=st.schedule,t=String(sc.serverTime||'').slice(11,16);
+    $('schedNow').textContent='Agora'+(t?' ('+t+')':'')+': '+(!sc.open?'fechado':'aberto · '+(sc.deliveryOpen?'com entrega':'sem entrega (só balcão e mesa)'))+(st.acceptingOrders?'':' · loja pausada no painel');
+    $('schedNow').style.color=sc.open&&st.acceptingOrders?'var(--ok)':'var(--warn)';$('schedText').textContent=sc.text}
+  catch(e){$('schedNow').textContent='Não foi possível ler os horários agora.'}
+}
 var hoursDraft=null;
 function renderHours(){
   hoursDraft=hoursDraft||{hours:clone(saved.hours||[]),deliveryRules:clone(saved.deliveryRules||[])};
