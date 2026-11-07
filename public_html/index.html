@@ -138,6 +138,7 @@ main{padding-block:8px 120px}
 .tg small{opacity:.75;font-variant-numeric:tabular-nums}
 .box-lines{display:grid}
 .minuta-note{background:var(--night);color:var(--night-ink);border-radius:18px;padding:16px 18px;display:flex;gap:14px;align-items:center}
+.minuta-note .lunch-off{color:#F7B55E}
 .minuta-note svg{flex:0 0 auto;color:var(--cor-primaria)}
 .empty{padding:40px 0;color:var(--muted);text-align:center}
 
@@ -450,7 +451,12 @@ function applyCatalog(c){
    nunca o relógio do celular. A loja só mostra o que o servidor responde e pergunta de novo a cada minuto. */
 function isOpen(){return !live.sched||live.sched.open!==false}            // sem servidor (pedido pelo WhatsApp) o restaurante confirma
 function deliveryOpen(){return !live.sched||live.sched.deliveryOpen!==false}
-function canOrder(){return live.accepting&&isOpen()}
+function lunchOpen(){return !live.sched||live.sched.lunchOpen!==false}   // almoço à la minuta só no horário do almoço (api/horarios.php)
+function lunchMsg(){return live.sched&&live.sched.lunchMsg||'O almoço à la minuta está fora do horário agora.'}
+function lunchHours(){var t=live.sched&&live.sched.text||'',m=t.match(/Almoço ([^•]+)/);return m?'Servido '+m[1].trim():''}
+function lunchOff(p){return p.group===MINUTA&&!lunchOpen()}
+function cartHasLunchOff(){return cart.some(function(l){var p=byId[l.id];return p&&lunchOff(p)})}
+function canOrder(){return live.accepting&&isOpen()&&!cartHasLunchOff()}
 function closedMsg(){return live.sched&&live.sched.closedMsg||'Estamos fechados.'}
 function fixMode(){if(form.mode==='entrega'&&(!live.delivery||!deliveryOpen()))form.mode='';if(!live.pickup&&(form.mode==='retirada'||form.mode==='local'))form.mode=''}
 function showHours(){
@@ -460,9 +466,10 @@ function showHours(){
 }
 async function pollStatus(){
   try{var st=await apiCall('status')}catch(e){return}
-  var before=JSON.stringify([live.accepting,live.pickup,live.delivery,isOpen(),deliveryOpen()]);
+  var before=JSON.stringify([live.accepting,live.pickup,live.delivery,isOpen(),deliveryOpen()]),lunchBefore=lunchOpen();
   live.accepting=st.acceptingOrders!==false;live.pickup=st.pickupEnabled!==false;live.delivery=st.deliveryEnabled!==false;if(st.schedule)live.sched=st.schedule;
   showHours();
+  if(lunchBefore!==lunchOpen()){renderMenu();if(openSheet===$('bagSheet')&&step==='bag')renderBag()}
   if(before!==JSON.stringify([live.accepting,live.pickup,live.delivery,isOpen(),deliveryOpen()])&&openSheet===$('bagSheet')&&(step==='bag'||step==='dados')){readForm();fixMode();persist();renderBag()}
 }
 
@@ -472,9 +479,9 @@ var menuEl=$('menu'),catsEl=$('cats');
 catsEl.innerHTML=groups.map(function(g,i){return '<button class="chip" data-cat="'+i+'">'+esc(g[0])+'</button>'}).join('');
 function qtyInCart(id){return cart.filter(function(l){return l.id===id}).reduce(function(s,l){return s+l.qty},0)}
 function cardHTML(p){
-  var n=qtyInCart(p.id),off=p.available===false;
-  return '<button class="card'+(off?' soldout':'')+'" data-id="'+p.id+'" aria-label="'+esc(p.name)+', '+money(p.price)+(off?', esgotado':'')+'">'+
-    '<span class="info2">'+(off?'<span class="badge badge-off">Esgotado</span>':p.badge?'<span class="badge">'+esc(p.badge)+'</span>':'')+
+  var n=qtyInCart(p.id),off=p.available===false,lo=!off&&lunchOff(p);
+  return '<button class="card'+(off||lo?' soldout':'')+'" data-id="'+p.id+'" aria-label="'+esc(p.name)+', '+money(p.price)+(off?', esgotado':lo?', fora do horário do almoço':'')+'">'+
+    '<span class="info2">'+(off?'<span class="badge badge-off">Esgotado</span>':lo?'<span class="badge badge-off">Só no almoço</span>':p.badge?'<span class="badge">'+esc(p.badge)+'</span>':'')+
     '<h3>'+esc(p.name)+'</h3>'+(p.desc?'<span class="desc">'+esc(p.desc)+'</span>':'')+
     '<span class="price">'+money(p.price)+'</span></span>'+
     '<span class="thumb">'+photoHTML(p)+(n?'<span class="incart">'+n+'</span>':'')+'<span class="plus" aria-hidden="true">+</span></span></button>';
@@ -487,7 +494,7 @@ function renderMenu(){
     var items=products.filter(function(p){return p.group===gi&&(!nq||norm(p.name+' '+p.desc+' '+g[0]).indexOf(nq)>-1)});
     if(!items.length)return; any=true;
     html+='<section class="group" id="cat-'+gi+'"><div class="group-head"><h2>'+esc(g[0])+'</h2><p>'+esc(g[1])+'</p></div>'+
-      (gi===MINUTA&&!nq?'<div class="minuta-note">'+icons[5]+'<p><b>Almoço à la minuta.</b> Todo prato vem com arroz, feijão, ovo, batata frita e salada mista. Escolha a carne abaixo.</p></div>':'')+
+      (gi===MINUTA&&!nq?'<div class="minuta-note">'+icons[5]+'<p><b>Almoço à la minuta'+(lunchHours()?' • '+esc(lunchHours()):'')+'</b> Todo prato vem com arroz, feijão, ovo, batata frita e salada mista. Escolha a carne abaixo.'+(lunchOpen()?'':'<br><b class="lunch-off">Agora está fora do horário do almoço.</b>')+'</p></div>':'')+
       '<div class="grid">'+items.map(cardHTML).join('')+'</div></section>';
   });
   menuEl.innerHTML=any?html:'<p class="empty">Nada encontrado para “'+esc(q)+'”. Tente “coração”, “fritas” ou “minuta”.</p>';
@@ -516,6 +523,7 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape'&&openSheet)c
 var cur={p:null,qty:1,remove:[],extras:[],choice:'',fromBag:false};
 function openItem(id,fromBag){
   var p=byId[id];if(p.available===false){toast(p.name+' está esgotado no momento');return}
+  if(lunchOff(p)){toast(lunchMsg());return}
   cur={p:p,qty:1,remove:[],extras:[],choice:'',fromBag:!!fromBag};
   var ch=choiceFor(p);$('itChoiceWrap').hidden=!ch;$('itChoiceErr').hidden=true;$('itChoiceText').classList.remove('invalid');
   if(ch){$('itChoiceLbl').innerHTML=esc(ch.label)+' <small>obrigatório</small>';
@@ -604,6 +612,7 @@ function renderBag(){
     if(!cart.length){body.innerHTML='<div class="empty-bag">'+icons[0]+'<b style="color:var(--carvao);font-size:18px">Sua sacola está vazia</b><p>Escolha um X, uma minuta ou uma porção de fritas para começar.</p></div>';foot.innerHTML='<button class="btn btn-ghost" data-act="close">Ver cardápio</button>';return}
     var lonelyBife=cart.some(function(l){return /bife adicional/i.test(byId[l.id].name)})&&!cart.some(function(l){var p=byId[l.id];return p.group===MINUTA&&!/bife adicional/i.test(p.name)});
     body.innerHTML=stepsHTML()+(live.accepting?(isOpen()?'':'<p class="paused">'+esc(closedMsg())+'</p>'):'<p class="paused">O Léo não está recebendo pedidos pelo site agora. Fale com a gente pelo WhatsApp: (51) 99620-0841.</p>')+
+      (cartHasLunchOff()?'<p class="paused">'+esc(lunchMsg())+' Remova a minuta da sacola para continuar.</p>':'')+
       (lonelyBife?'<p class="hint warn">O Bife Adicional é um acompanhamento da minuta. Adicione uma minuta ou confirme com o restaurante.</p>':'')+'<div>'+cart.map(function(l,i){var p=byId[l.id],n=lineDesc(l);
       return '<div class="line"><h4>'+(p.group===MINUTA?'Minuta ':'')+esc(p.name)+'</h4><span class="lp">'+money(linePrice(l)*l.qty)+'</span>'+
       (n?'<span class="note">'+esc(n)+'</span>':'')+

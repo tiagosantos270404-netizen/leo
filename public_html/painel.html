@@ -781,7 +781,7 @@ $('salesChips').addEventListener('click',function(e){var c=e.target.closest('[da
 /* horários vêm do servidor (api/horarios.php), sempre pela hora do servidor */
 async function loadSched(){
   try{var st=await api('status'),sc=st.schedule,t=String(sc.serverTime||'').slice(11,16);
-    $('schedNow').textContent='Agora'+(t?' ('+t+')':'')+': '+(!sc.open?'fechado':'aberto · '+(sc.deliveryOpen?'com entrega':'sem entrega (só balcão e mesa)'))+(st.acceptingOrders?'':' · loja pausada no painel');
+    $('schedNow').textContent='Agora'+(t?' ('+t+')':'')+': '+(!sc.open?'fechado':'aberto · '+(sc.deliveryOpen?'com entrega':'sem entrega (só balcão e mesa)')+(sc.lunchOpen===false?' · almoço fora do horário':sc.lunchOpen?' · almoço liberado':''))+(st.acceptingOrders?'':' · loja pausada no painel');
     $('schedNow').style.color=sc.open&&st.acceptingOrders?'var(--ok)':'var(--warn)';$('schedText').textContent=sc.text}
   catch(e){$('schedNow').textContent='Não foi possível ler os horários agora.'}
 }

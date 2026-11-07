@@ -18,4 +18,9 @@ return [
     'entrega_dias'   => [1, 2, 3, 4, 5, 6],
     'entrega_inicio' => '09:00',
     'entrega_fim'    => '18:00',
+
+    // almoço à la minuta (só dá para pedir neste horário, dentro do horário do restaurante)
+    'almoco_dias'   => [1, 2, 3, 4, 5, 6],
+    'almoco_inicio' => '11:30',
+    'almoco_fim'    => '15:00',
 ];

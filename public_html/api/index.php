@@ -107,6 +107,10 @@ function isDeliveryOpenNow(): bool {
     $h = schedule(); $n = nowLocal();
     return inWindow($h['dias'], $h['abre'], $h['fecha'], $n) && inWindow($h['entrega_dias'] ?? $h['dias'], $h['entrega_inicio'], $h['entrega_fim'], $n);
 }
+function isLunchOpenNow(): bool {
+    $h = schedule(); if (empty($h['almoco_inicio'])) return true; $n = nowLocal();
+    return inWindow($h['dias'], $h['abre'], $h['fecha'], $n) && inWindow($h['almoco_dias'] ?? $h['dias'], $h['almoco_inicio'], $h['almoco_fim'], $n);
+}
 /* [1,2,3,4,5,6] -> "segunda a sábado" (ou "Seg a Sáb" no formato curto) */
 function diasTexto(array $d, bool $curto): string {
     $nomes = $curto ? ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'] : ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
@@ -119,9 +123,13 @@ function diasTexto(array $d, bool $curto): string {
 function scheduleInfo(): array {
     $h = schedule(); $ed = $h['entrega_dias'] ?? $h['dias'];
     $sameDays = array_values(array_unique($ed)) == array_values(array_unique($h['dias']));
+    $ad = $h['almoco_dias'] ?? $h['dias']; $lunchSameDays = array_values(array_unique($ad)) == array_values(array_unique($h['dias']));
+    $lunch = empty($h['almoco_inicio']) ? '' : ' • Almoço ' . ($lunchSameDays ? '' : diasTexto($ad, true) . ' ') . 'das ' . $h['almoco_inicio'] . ' às ' . $h['almoco_fim'];
     return [
         'open' => isOpenNow(), 'deliveryOpen' => isDeliveryOpenNow(), 'serverTime' => nowLocal()->format('Y-m-d\TH:i:sP'),
-        'text' => diasTexto($h['dias'], true) . ' • Aberto das ' . $h['abre'] . ' às ' . $h['fecha'] . ' • Entregas ' . ($sameDays ? '' : diasTexto($ed, true) . ' ') . 'das ' . $h['entrega_inicio'] . ' às ' . $h['entrega_fim'],
+        'text' => diasTexto($h['dias'], true) . ' • Aberto das ' . $h['abre'] . ' às ' . $h['fecha'] . ' • Entregas ' . ($sameDays ? '' : diasTexto($ed, true) . ' ') . 'das ' . $h['entrega_inicio'] . ' às ' . $h['entrega_fim'] . $lunch,
+        'lunchOpen' => isLunchOpenNow(),
+        'lunchMsg' => empty($h['almoco_inicio']) ? '' : 'O almoço à la minuta sai de ' . diasTexto($ad, false) . ', das ' . $h['almoco_inicio'] . ' às ' . $h['almoco_fim'] . '.',
         'closedMsg' => 'Estamos fechados. Funcionamos de ' . diasTexto($h['dias'], false) . ', das ' . $h['abre'] . ' às ' . $h['fecha'] . '.',
         'deliveryMsg' => 'Entregas de ' . diasTexto($ed, false) . ', das ' . $h['entrega_inicio'] . ' às ' . $h['entrega_fim'],
     ];
@@ -209,6 +217,7 @@ function compute(array $in, array $s): array {
     foreach ($raw as $l) {
         $p = $byId[(string) ($l['id'] ?? '')] ?? null;
         if (!$p || !$p['available']) fail(409, 'Um item da sacola não está mais disponível. Revise a sacola.');
+        if ($p['group'] === 5 && !isLunchOpenNow()) fail(409, scheduleInfo()['lunchMsg'] . ' Tire a minuta da sacola para continuar.');
         $qty = (int) ($l['qty'] ?? 0); if ($qty < 1 || $qty > 30) fail(422, 'Quantidade inválida.');
         $ex = []; $unit = $p['price'];
         foreach (array_unique(array_map('strval', (array) ($l['extras'] ?? []))) as $xid) {
