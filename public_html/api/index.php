@@ -226,7 +226,10 @@ function compute(array $in, array $s): array {
         if (!empty($s['restrictDelivery']) && (!$rule || !$rule['available'])) fail(409, "Ainda não entregamos no bairro $nb. Fale com a gente no WhatsApp.");
         if ($rule && $rule['available']) { $fee = $rule['fee']; $nb = $rule['neighborhood']; }
     }
-    return ['mode' => $mode, 'table' => $table, 'customer' => ['name' => $name, 'phone' => $phone], 'address' => $address, 'neighborhood' => $nb,
+    /* forma de pagamento: pix | card | cash ('' em pedidos de versões antigas da loja) */
+    $pay = in_array($in['pay'] ?? '', ['pix', 'card', 'cash'], true) ? $in['pay'] : '';
+    if ($pay === 'pix' && $mode === 'delivery' && $fee === null) fail(409, 'Para outros bairros, pague na entrega.');
+    return ['mode' => $mode, 'table' => $table, 'pay' => $pay, 'customer' => ['name' => $name, 'phone' => $phone], 'address' => $address, 'neighborhood' => $nb,
         'notes' => str($in['notes'] ?? '', 600), 'lines' => $lines, 'subtotal' => $sub, 'fee' => $fee];
 }
 function quoteSig(array $q, int $exp): string { return $exp . '.' . hmac('quote.' . $exp . '.' . json_encode($q, JSON_UNESCAPED_UNICODE)); }
@@ -239,6 +242,42 @@ function saveOrder(array $o): void {
     db()->prepare('UPDATE orders SET data=?, version=? WHERE id=?')->execute([json_encode($o, JSON_UNESCAPED_UNICODE), $o['version'], $o['id']]);
 }
 function canSee(string $id, ?string $token): bool { return isAdmin() || ($token !== null && hash_equals(orderToken($id), $token)); }
+
+/* ---------- comprovantes de Pix ----------
+   Ficam FORA da pasta pública do site (sem endereço na internet). Só a rota do painel, com login, entrega o arquivo. */
+const PROOF_MAX = 5 * 1024 * 1024;
+const PROOF_TYPES = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'application/pdf' => 'pdf'];
+function proofDir(): string {
+    static $dir = null; if ($dir !== null) return $dir;
+    $root = rtrim((string) ($_SERVER['DOCUMENT_ROOT'] ?? ''), '/');
+    foreach ([$root !== '' ? dirname($root) . '/comprovantes' : '', __DIR__ . '/comprovantes'] as $d) {
+        if ($d === '') continue;
+        if (!is_dir($d)) @mkdir($d, 0750, true);
+        if (is_dir($d) && is_writable($d)) {
+            // se cair dentro do site (plano B), bloqueia o acesso direto pelo navegador
+            if (str_starts_with($d, __DIR__) && !is_file("$d/.htaccess")) @file_put_contents("$d/.htaccess", "Require all denied\n");
+            return $dir = $d;
+        }
+    }
+    fail(500, 'Não foi possível guardar o comprovante agora. Tente de novo.');
+}
+/* confere o arquivo pelo conteúdo (não pelo nome nem pelo que o navegador diz) e devolve o tipo real */
+function checkProof(?array $f): string {
+    if (!$f || !isset($f['error'])) fail(422, 'Anexe o comprovante do Pix.');
+    if (in_array($f['error'], [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)) fail(413, 'O comprovante passa de 5 MB. Envie um arquivo menor.');
+    if ($f['error'] !== UPLOAD_ERR_OK || !is_uploaded_file($f['tmp_name'])) fail(422, 'Não recebemos o comprovante. Tente anexar de novo.');
+    if ($f['size'] <= 0 || $f['size'] > PROOF_MAX) fail(413, 'O comprovante passa de 5 MB. Envie um arquivo menor.');
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($f['tmp_name']) ?: '';
+    if (!isset(PROOF_TYPES[$mime])) fail(415, 'Formato não aceito. Envie o comprovante em JPG, PNG ou PDF.');
+    if ($mime === 'application/pdf') {
+        if (file_get_contents($f['tmp_name'], false, null, 0, 5) !== '%PDF-') fail(415, 'O PDF do comprovante está corrompido.');
+    } else {
+        $img = @getimagesize($f['tmp_name']);
+        if (!$img || $img['mime'] !== $mime || $img[0] < 50 || $img[1] < 50) fail(415, 'A imagem do comprovante não pôde ser lida. Envie outra foto ou um PDF.');
+    }
+    return $mime;
+}
+function proofPublic(array $o): array { if (isset($o['proof'])) unset($o['proof']['file']); return $o; } // cliente não precisa do nome interno
 
 /* ---------- rotas ---------- */
 try {
@@ -298,7 +337,13 @@ try {
         out(['subtotal' => $q['subtotal'], 'fee' => $q['fee'], 'total' => $q['fee'] === null ? null : $q['subtotal'] + $q['fee'], 'signature' => quoteSig($q, $exp)]);
     }
     if ($path === 'orders' && $method === 'POST') {
-        $b = body();
+        /* pedido com Pix vem como formulário com arquivo: campo "payload" (o mesmo JSON de sempre) + arquivo "proof" */
+        if (stripos($_SERVER['CONTENT_TYPE'] ?? '', 'multipart/form-data') === 0) {
+            // envio maior que o limite do PHP chega vazio: avisa do tamanho em vez de "dados inválidos"
+            if (!$_POST && (int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) fail(413, 'O comprovante passa de 5 MB. Envie um arquivo menor.');
+            $b = json_decode((string) ($_POST['payload'] ?? ''), true);
+            if (!is_array($b)) fail(400, 'Dados inválidos.');
+        } else $b = body();
         $key = str($b['key'] ?? '', 64); if ($key === '') fail(422, 'Pedido sem identificador.');
         $st = db()->prepare('SELECT id, data FROM orders WHERE idem=?'); $st->execute([$key]);
         if ($r = $st->fetch()) { $o = json_decode($r['data'], true); out(['id' => $o['id'], 'number' => $o['number'], 'token' => orderToken($o['id']), 'created' => $o['created']]); }
@@ -306,13 +351,24 @@ try {
         $q = compute($b, settings());
         $sig = (string) ($b['quote'] ?? ''); $exp = (int) explode('.', $sig)[0];
         if ($exp < time() || !hash_equals(quoteSig($q, $exp), $sig)) fail(409, 'Os valores do pedido mudaram. Volte e revise o pedido.');
+        // Pix com chave cadastrada no painel: o comprovante é obrigatório e vai junto com o pedido
+        $s = settings(); $needProof = $q['pay'] === 'pix' && !empty($s['pix']['key']);
+        $mime = $needProof ? checkProof($_FILES['proof'] ?? null) : '';
         $id = bin2hex(random_bytes(12)); $ms = nowMs();
-        $o = ['id' => $id, 'number' => '', 'created' => iso($ms), 'status' => 'received', 'payment' => 'pending', 'fee' => $q['fee'],
-            'fee_approved' => $q['fee'] !== null, 'cancelReason' => '', 'version' => 1,
+        $o = ['id' => $id, 'number' => '', 'created' => iso($ms), 'status' => 'received', 'payment' => $needProof ? 'review' : 'pending', 'fee' => $q['fee'],
+            'fee_approved' => $q['fee'] !== null, 'cancelReason' => '', 'payMethod' => $q['pay'], 'version' => 1,
             'snapshot' => ['customer' => $q['customer'], 'mode' => $q['mode'], 'table' => $q['table'], 'address' => $q['address'], 'neighborhood' => $q['neighborhood'], 'notes' => $q['notes'], 'lines' => $q['lines'], 'subtotal' => $q['subtotal']]];
         $pdo = db(); $pdo->beginTransaction();
         $pdo->prepare('INSERT INTO orders (id, created_ts, idem, version, data) VALUES (?, ?, ?, 1, ?)')->execute([$id, $ms, $key, '{}']);
-        $o['number'] = '#' . $pdo->lastInsertId(); saveOrder($o); $pdo->commit();
+        $num = (int) $pdo->lastInsertId(); $o['number'] = '#' . $num;
+        if ($needProof) {
+            // nome único: número do pedido + data/hora + final aleatório (ex.: pedido-1023_2026-11-07_14-32_a7f3c9.jpg)
+            $name = 'pedido-' . $num . '_' . nowLocal()->format('Y-m-d_H-i') . '_' . bin2hex(random_bytes(3)) . '.' . PROOF_TYPES[$mime];
+            if (!move_uploaded_file($_FILES['proof']['tmp_name'], proofDir() . '/' . $name)) { $pdo->rollBack(); fail(500, 'Não foi possível guardar o comprovante agora. Tente de novo.'); }
+            @chmod(proofDir() . '/' . $name, 0640);
+            $o['proof'] = ['file' => $name, 'type' => $mime, 'size' => (int) $_FILES['proof']['size'], 'sent' => iso($ms)];
+        }
+        saveOrder($o); $pdo->commit();
         out(['id' => $id, 'number' => $o['number'], 'token' => orderToken($id), 'created' => $o['created']], 201);
     }
     if ($path === 'orders' && $method === 'GET') {
@@ -321,9 +377,22 @@ try {
         $st = db()->prepare('SELECT data, version FROM orders WHERE created_ts >= ? ORDER BY num DESC LIMIT 3000'); $st->execute([$since]);
         out(['orders' => array_map(function ($r) { $o = json_decode($r['data'], true); $o['version'] = (int) $r['version']; return $o; }, $st->fetchAll())]);
     }
+    /* comprovante do Pix: só o painel do Léo (com login) consegue abrir */
+    if (preg_match('#^orders/([0-9a-f]{24})/proof$#', $path, $m) && $method === 'GET') {
+        requireAdmin();
+        $o = loadOrder($m[1]); $p = $o['proof'] ?? null;
+        if (!$p || !preg_match('/^[a-z0-9_.-]+$/i', $p['file'])) fail(404, 'Este pedido não tem comprovante.');
+        $file = proofDir() . '/' . $p['file'];
+        if (!is_file($file)) fail(404, 'O arquivo do comprovante não foi encontrado.');
+        header('Content-Type: ' . (isset(PROOF_TYPES[$p['type']]) ? $p['type'] : 'application/octet-stream'));
+        header('Content-Length: ' . filesize($file));
+        header('Content-Disposition: inline; filename="' . $p['file'] . '"');
+        header('Cache-Control: private, no-store');
+        readfile($file); exit;
+    }
     if (preg_match('#^orders/([0-9a-f]{24})$#', $path, $m)) {
         $id = $m[1];
-        if ($method === 'GET') { if (!canSee($id, $_GET['token'] ?? null)) fail(404, 'Pedido não encontrado.'); out(loadOrder($id)); }
+        if ($method === 'GET') { if (!canSee($id, $_GET['token'] ?? null)) fail(404, 'Pedido não encontrado.'); out(isAdmin() ? loadOrder($id) : proofPublic(loadOrder($id))); }
         if ($method === 'PATCH') {
             $b = body(); $act = (string) ($b['action'] ?? ''); $val = $b['value'] ?? null;
             $admin = isAdmin();
@@ -339,11 +408,15 @@ try {
                     'out_for_delivery' => ['completed', 'cancelled'], 'completed' => [], 'cancelled' => []][$o['status']];
                 if (!in_array($val, $next, true)) { $pdo->rollBack(); fail(409, 'Mudança de andamento não permitida.'); }
                 if ($val !== 'cancelled' && !$o['fee_approved']) { $pdo->rollBack(); fail(409, 'O cliente ainda não aceitou a taxa de entrega.'); }
+                if ($val !== 'cancelled' && isset($o['proof']) && $o['payment'] !== 'approved') { $pdo->rollBack(); fail(409, 'Confirme o pagamento do Pix antes de iniciar o preparo.'); }
                 $o['status'] = $val; if ($val === 'cancelled') $o['cancelReason'] = str($b['reason'] ?? '', 140);
             } elseif ($act === 'payment') {
-                $next = ['pending' => ['approved', 'rejected', 'expired'], 'approved' => ['refunded'], 'rejected' => ['pending'], 'expired' => ['pending'], 'refunded' => []][$o['payment']];
+                $next = ['pending' => ['approved', 'rejected', 'expired'], 'review' => ['approved', 'rejected'], 'approved' => ['refunded'], 'rejected' => ['pending'], 'expired' => ['pending'], 'refunded' => []][$o['payment']] ?? [];
                 if (!in_array($val, $next, true) || ($val === 'approved' && $o['status'] === 'cancelled')) { $pdo->rollBack(); fail(409, 'Mudança de pagamento não permitida.'); }
-                $o['payment'] = $val;
+                $wasReview = $o['payment'] === 'review'; $o['payment'] = $val;
+                if ($val === 'rejected') $o['payReason'] = str($b['reason'] ?? '', 140);
+                // Pix confirmado pelo Léo: o pedido vai direto para o preparo
+                if ($wasReview && $val === 'approved' && $o['status'] === 'received' && $o['fee_approved']) $o['status'] = 'preparing';
             } elseif ($act === 'fee') {
                 if (!$del || $o['status'] !== 'received' || $o['payment'] !== 'pending') { $pdo->rollBack(); fail(409, 'Não dá para mudar o frete agora.'); }
                 $o['fee'] = cents($val, 100000); $o['fee_approved'] = false;

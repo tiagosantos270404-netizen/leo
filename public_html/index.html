@@ -238,6 +238,24 @@ select.inp{min-height:50px;appearance:auto}
 .pays{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .pays button{min-height:48px;border-radius:12px;border:1.5px solid var(--line);background:var(--surface);font-weight:600;cursor:pointer}
 .pays button[aria-pressed="true"]{border-color:var(--brasa);color:var(--brasa);background:var(--surface-2)}
+.pays button:disabled{opacity:.45;cursor:not-allowed}
+/* Pix com comprovante */
+.pixbox{display:grid;gap:12px;background:var(--surface);border:1.5px solid var(--cor-primaria);border-radius:16px;padding:16px}
+.pixbox h3{font-size:20px;font-weight:700}
+.pixval{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.pixval b{font-family:var(--f-display);font-size:32px;color:var(--cor-primaria);font-variant-numeric:tabular-nums}
+.pixrow{display:grid;gap:2px}
+.pixrow span{font-size:13px;color:var(--muted);font-weight:600}
+.pixrow code{font:700 17px ui-monospace,Consolas,monospace;word-break:break-all;color:var(--carvao)}
+.proofbtns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.proofbtns label{position:relative;min-height:52px;font-size:15px;text-align:center}
+.proofprev{display:flex;align-items:center;gap:12px;background:var(--surface-2);border-radius:12px;padding:10px}
+.proofprev img{width:72px;height:72px;object-fit:cover;border-radius:8px;background:#fff}
+.proofprev .pdf{width:72px;height:72px;border-radius:8px;display:grid;place-items:center;background:#fff;color:#C0392B;font-weight:800}
+.proofprev div{min-width:0;flex:1}
+.proofprev b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.proofprev small{color:var(--muted)}
+.proofprev button{border:0;background:none;color:var(--muted);text-decoration:underline;cursor:pointer;font-size:13.5px}
 .preview{white-space:pre-wrap;font-size:14px;line-height:1.45;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;max-height:280px;overflow:auto}
 .steps{display:flex;gap:6px;font-size:12.5px;font-weight:700;color:var(--muted)}
 .steps span{flex:1;padding-top:6px;border-top:3px solid var(--line)}
@@ -416,7 +434,7 @@ function applyCatalog(c){
   (c.products||[]).forEach(function(p){var q={id:p.id,name:p.name,price:p.price,desc:p.description||(p.group===MINUTA?'Arroz, feijão, ovo, batata frita e salada mista.':''),badge:p.badge||badges[p.id]||'',image:p.image||'',group:p.group,available:p.available!==false,extras:(p.extras||[]).filter(function(x){return x.available!==false})};products.push(q);byId[q.id]=q});
   live.accepting=c.acceptingOrders!==false;live.pickup=c.pickupEnabled!==false;live.delivery=c.deliveryEnabled!==false;
   /* opcionais (precisam do servidor guardar e devolver estes campos, ver MELHORIAS-SERVIDOR.txt) */
-  live.eta=c.eta||{};live.pix=!!(c.pix&&c.pix.key);
+  live.eta=c.eta||{};live.pix=!!(c.pix&&c.pix.key);live.pixInfo=live.pix?{key:c.pix.key,name:c.pix.name||''}:null;
   var rules=(c.deliveryRules||[]).filter(function(r){return r.available!==false&&r.neighborhood});
   live.areas=rules.map(function(r){return r.neighborhood});
   live.fees={};rules.forEach(function(r){live.fees[normBairro(r.neighborhood)]=r.fee==null?null:r.fee});
@@ -592,6 +610,7 @@ function renderBag(){
       '<div class="ctrl"><div class="stepper sm"><button data-dec="'+i+'" aria-label="Diminuir">−</button><output>'+l.qty+'</output><button data-inc="'+i+'" aria-label="Aumentar">+</button></div><button class="rm" data-rm="'+i+'">Remover</button></div></div>'}).join('')+'</div>'+upsellHTML()+sumHTML();
     foot.innerHTML='<button class="btn btn-primary" data-act="dados" '+(canOrder()?'':'disabled')+'><span>Continuar</span><span>'+money(subtotal())+'</span></button><button class="btn btn-ghost" data-act="close">Adicionar mais itens</button>';
   } else if(step==='dados'){
+    if(form.pay==='Pix'&&pixBlocked())form.pay='';
     body.innerHTML=stepsHTML()+
     '<div class="field"><label for="fName">Seu nome</label><input id="fName" type="text" autocomplete="given-name" value="'+esc(form.name)+'"><span class="err" id="eName" hidden>Informe seu nome para identificarmos o pedido.</span></div>'+
     '<div class="field"><label for="fPhone">WhatsApp / telefone</label><input id="fPhone" type="tel" autocomplete="tel" inputmode="tel" placeholder="(51) 9…" value="'+esc(form.phone)+'"><span class="err" id="ePhone" hidden>Informe um telefone para o restaurante falar com você.</span></div>'+
@@ -602,17 +621,18 @@ function renderBag(){
       '<div class="field"><label for="fAddr">Endereço e número <small>com ponto de referência</small></label><input id="fAddr" type="text" autocomplete="street-address" value="'+esc(form.address)+'"><span class="err" id="eAddr" hidden>Informe o endereço para a entrega.</span></div>'
       :form.mode==='retirada'?'<p style="color:var(--muted);font-size:14.5px">Retire no balcão: Av. Visconde do Rio Grande, 1451, Centro.</p>'
       :form.mode==='local'?'<div class="field"><label for="fMesa">Número da mesa <small>(opcional)</small></label><input id="fMesa" type="text" maxlength="10" placeholder="Ex.: 5" value="'+esc(form.mesa||'')+'"><span class="hint">Já está sentado? Informe a mesa para levarmos até você.</span></div>':'')+
-    '<div class="field"><span class="lbl">Pagamento <small>'+(live.pix&&live.on?'Pix: pague pelo site depois de confirmar':'na entrega ou no restaurante')+'</small></span><div class="pays" role="group">'+['Pix','Cartão','Dinheiro'].map(function(p){return '<button data-pay="'+p+'" aria-pressed="'+(form.pay===p)+'">'+p+'</button>'}).join('')+'</div></div>'+
+    '<div class="field"><span class="lbl">Pagamento <small>'+(live.pixInfo&&live.on?'Pix: pague agora e anexe o comprovante':'na entrega ou no restaurante')+'</small></span><div class="pays" role="group" id="fPays">'+['Pix','Cartão','Dinheiro'].map(function(p){var dis=p==='Pix'&&pixBlocked();return '<button data-pay="'+p+'" aria-pressed="'+(form.pay===p)+'"'+(dis?' disabled':'')+'>'+p+'</button>'}).join('')+'</div>'+
+      (pixBlocked()?'<span class="hint warn">Para outros bairros, pague na entrega.</span>':'')+'<span class="err" id="ePay" hidden>Escolha a forma de pagamento.</span></div>'+
     (form.pay==='Dinheiro'?'<div class="field"><label for="fTroco">Troco para quanto? <small>(opcional)</small></label><input id="fTroco" type="text" inputmode="decimal" placeholder="Ex.: 100" value="'+esc(form.troco)+'"></div>':'')+
     '<div class="field"><label for="fNotes">Observações gerais <small>(opcional)</small></label><textarea id="fNotes" placeholder="Ex.: interfone com defeito, chamar no portão">'+esc(form.notes)+'</textarea></div>'+
     '<div id="dadosSum">'+sumHTML()+'</div>'+
     '<p class="legal">Seus dados são usados só para preparar e entregar este pedido.</p>';
     foot.innerHTML='<button class="btn btn-primary" data-act="revisar">Revisar pedido</button>';
   } else if(step==='revisar'&&live.on){
-    body.innerHTML=stepsHTML()+'<div id="quoteBox"><p class="muted">Calculando o total com o restaurante…</p></div>'+
+    body.innerHTML=stepsHTML()+'<div id="quoteBox"><p class="muted">Calculando o total com o restaurante…</p></div>'+(proofFlow()?'<div id="pixBox" hidden></div>':'')+
       '<div class="box-lines">'+cart.map(function(l){var p=byId[l.id],d=lineDesc(l);return '<div class="line"><h4>'+l.qty+'× '+(p.group===MINUTA?'Minuta ':'')+esc(p.name)+'</h4><span class="lp">'+money(linePrice(l)*l.qty)+'</span>'+(d?'<span class="note">'+esc(d)+'</span>':'')+'</div>'}).join('')+'</div>'+
       '<p style="font-size:14px;color:var(--muted)">'+esc(form.name)+' · '+esc(form.phone)+'<br>'+esc(modeText())+'<br>Pagamento: '+esc(payText())+'</p><p class="err" id="sendErr" role="alert"></p>';
-    foot.innerHTML='<button class="btn btn-primary" data-act="send" id="sendBtn" disabled>Confirmar pedido</button>'+waBtn('btn-ghost','Prefiro enviar pelo WhatsApp');
+    foot.innerHTML='<button class="btn btn-primary" data-act="send" id="sendBtn" disabled>Finalizar pedido</button>'+waBtn('btn-ghost','Prefiro enviar pelo WhatsApp');
     getQuote();
   } else if(step==='revisar'){
     body.innerHTML=stepsHTML()+sumHTML()+'<div class="field"><span class="lbl">Mensagem que vai para o Léo</span><div class="preview" id="pv">'+esc(message())+'</div></div>'+
@@ -643,6 +663,7 @@ function validate(){
   var ok=true;
   function chk(id,eid,bad){var el=$(id);if(!el)return;el.classList.toggle('invalid',bad);$(eid).hidden=!bad;if(bad&&ok){el.focus();ok=false}}
   chk('fName','eName',!form.name.trim());
+  var badPay=!form.pay||(form.pay==='Pix'&&pixBlocked());if($('ePay')){$('ePay').hidden=!badPay;if(badPay&&ok){var pb=$('fPays').querySelector('button:not(:disabled)');if(pb)pb.focus();ok=false}}
   if(live.on)chk('fPhone','ePhone',String(form.phone||'').replace(/\D/g,'').length<10);
   var badMode=!MODES.some(function(m){return m[0]===form.mode&&$('fModes').querySelector('[data-mode="'+m[0]+'"]:not(:disabled)')});
   $('fModes').classList.toggle('invalid',badMode);$('eMode').hidden=!badMode;
@@ -668,28 +689,94 @@ function message(){
 function payText(){return form.pay+(form.pay==='Dinheiro'&&String(form.troco||'').trim()?' (troco para R$ '+form.troco.trim()+')':'')}
 function waBtn(cls,label){return '<a class="btn '+cls+'" id="waLink" href="https://wa.me/'+WA+'?text='+encodeURIComponent(message())+'" target="_blank" rel="noopener">'+label+'</a>'}
 
+/* ---------- Pix com comprovante (sem API de Pix: o Léo confere no app do banco e confirma no painel) ---------- */
+var PROOF_MAX=5*1024*1024,proof=null; // proof = {blob,name,type,size,url}
+function proofFlow(){return live.on&&!!live.pixInfo&&form.pay==='Pix'}
+function pixBlocked(){return live.on&&!!live.pixInfo&&form.mode==='entrega'&&(form.bairroOutro||(!!form.bairro.trim()&&knownFee(form.bairro)==null))}
+function kb(n){return n<1048576?Math.max(1,Math.round(n/1024))+' KB':(n/1048576).toFixed(1).replace('.',',')+' MB'}
+function renderPixBox(total){
+  var bx=$('pixBox');if(!bx)return;var px=live.pixInfo;bx.hidden=false;
+  bx.innerHTML='<div class="pixbox"><h3>Pague com Pix</h3>'+
+    '<div class="pixval"><span>Valor total</span><b>'+money(total)+'</b></div>'+
+    '<div class="pixrow"><span>Chave Pix</span><code id="pixKeyTxt">'+esc(px.key)+'</code></div>'+
+    '<button type="button" class="btn btn-ghost" data-act="copykey">Copiar chave</button>'+
+    (px.name?'<div class="pixrow"><span>Nome do recebedor</span><b>'+esc(px.name)+'</b></div>':'')+
+    '<div class="field"><span class="lbl">Anexar comprovante <small>JPG, PNG ou PDF, até 5 MB</small></span>'+
+      '<div class="proofbtns"><label class="btn btn-ghost">Tirar foto<input type="file" class="sr" accept="image/*" capture="environment" data-proof aria-label="Tirar foto do comprovante"></label>'+
+      '<label class="btn btn-ghost">Galeria ou PDF<input type="file" class="sr" accept="image/jpeg,image/png,application/pdf,image/*" data-proof aria-label="Escolher comprovante da galeria ou PDF"></label></div>'+
+      '<div id="proofPrev"></div><span class="err" id="proofErr" role="alert" hidden></span></div>'+
+    '<p class="hint" id="proofHint">Depois de pagar no app do banco, anexe o comprovante para liberar o botão Finalizar pedido.</p></div>';
+  renderProof();
+}
+function renderProof(){
+  var pv=$('proofPrev');if(!pv)return;
+  pv.innerHTML=proof?'<div class="proofprev">'+(proof.type==='application/pdf'?'<span class="pdf">PDF</span>':'<img src="'+proof.url+'" alt="Prévia do comprovante">')+
+    '<div><b>'+esc(proof.name)+'</b><small>'+kb(proof.size)+(proof.reduced?' · foto reduzida para enviar':'')+'</small></div><button type="button" data-act="rmproof">Remover</button></div>':'';
+  if($('proofHint'))$('proofHint').hidden=!!proof;
+}
+function proofError(m){var e=$('proofErr');if(e){e.textContent=m;e.hidden=!m}}
+function clearProof(){if(proof&&proof.url)URL.revokeObjectURL(proof.url);proof=null}
+function updSend(){var b=$('sendBtn');if(b)b.disabled=!quote||(proofFlow()&&!proof)}
+/* reduz fotos grandes (ou em formato que o servidor não aceita, como HEIC) para JPEG */
+function toJpeg(file,maxSide,quality){return new Promise(function(res,rej){
+  var u=URL.createObjectURL(file),img=new Image();
+  img.onload=function(){var w=img.naturalWidth,h=img.naturalHeight,k=Math.min(1,maxSide/Math.max(w,h)),c=document.createElement('canvas');
+    c.width=Math.round(w*k);c.height=Math.round(h*k);var g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(u);
+    c.toBlob(function(b){b?res(b):rej(Error('falhou'))},'image/jpeg',quality)};
+  img.onerror=function(){URL.revokeObjectURL(u);rej(Error('formato'))};img.src=u})}
+async function pickProof(f){
+  proofError('');var type=f.type||'',name=f.name||'comprovante';
+  try{
+    if(type==='application/pdf'||/\.pdf$/i.test(name)){
+      if(f.size>PROOF_MAX)throw Error('O PDF tem '+kb(f.size)+' e passa de 5 MB. Envie um arquivo menor ou uma foto do comprovante.');
+      setProof(f,name,'application/pdf',false);return}
+    if(!/^image\//.test(type)&&!/\.(jpe?g|png|heic|heif|webp)$/i.test(name))throw Error('Formato não aceito. Envie o comprovante em JPG, PNG ou PDF.');
+    if((type==='image/jpeg'||type==='image/png')&&f.size<=PROOF_MAX){setProof(f,name,type,false);return}
+    // foto grande ou em outro formato: tenta reduzir/converter para JPEG
+    var b=null;for(var q of [[2000,.85],[1600,.75],[1200,.7]]){try{b=await toJpeg(f,q[0],q[1])}catch(e){throw Error('Formato não aceito. Envie o comprovante em JPG, PNG ou PDF.')}if(b.size<=PROOF_MAX)break}
+    if(!b||b.size>PROOF_MAX)throw Error('A foto passa de 5 MB mesmo reduzida. Tire outra foto ou envie um PDF.');
+    setProof(b,name.replace(/\.[^.]+$/,'')+'.jpg','image/jpeg',true);
+  }catch(err){clearProof();renderProof();proofError(err.message)}
+  updSend();
+}
+function setProof(blob,name,type,reduced){clearProof();proof={blob:blob,name:name,type:type,size:blob.size,reduced:reduced,url:type==='application/pdf'?'':URL.createObjectURL(blob)};renderProof();updSend()}
+function copyKey(btn){var k=live.pixInfo.key;
+  function ok(){btn.textContent='Copiado!';clearTimeout(btn._t);btn._t=setTimeout(function(){btn.textContent='Copiar chave'},2500)}
+  function sel(){var r=document.createRange();r.selectNodeContents($('pixKeyTxt'));var g=getSelection();g.removeAllRanges();g.addRange(r);btn.textContent='Chave selecionada: copie'}
+  try{navigator.clipboard.writeText(k).then(ok,sel)}catch(e){sel()}}
+async function sendWithProof(payload){
+  var fd=new FormData();fd.append('payload',JSON.stringify(payload));fd.append('proof',proof.blob,proof.name);
+  var r=await fetch('/api/orders',{method:'POST',body:fd,credentials:'same-origin',cache:'no-store'}),d;
+  try{d=await r.json()}catch(e){throw Error('O servidor não respondeu. Tente novamente.')}
+  if(!r.ok){var e2=Error(d.error||'Não foi possível concluir.');e2.status=r.status;throw e2}return d;
+}
+
 /* pedido pelo servidor: mesmo formato do site atual (cotação assinada + chave contra pedido duplicado) */
 var quote=null;
 function modeText(){return form.mode==='entrega'?form.address.trim()+' — '+form.bairro.trim():form.mode==='local'?'Comer no restaurante'+(String(form.mesa||'').trim()?' · Mesa '+String(form.mesa).trim():''):'Retirar no balcão (para levar)'}
-function orderInput(){return {lines:cart.map(function(l){return {id:l.id,qty:l.qty,note:lineNote(l).slice(0,300),extras:(l.extras||[]).slice()}}),mode:{entrega:'delivery',retirada:'pickup',local:'dine_in'}[form.mode],table:form.mode==='local'?String(form.mesa||'').trim().slice(0,10):'',customer:{name:form.name.trim(),phone:String(form.phone||'').trim()},address:form.mode==='entrega'?form.address.trim():'',neighborhood:form.mode==='entrega'?form.bairro.trim():'',notes:(form.notes.trim()?form.notes.trim()+' · ':'')+'Pagamento: '+payText()}}
+function orderInput(){return {pay:{Pix:'pix','Cartão':'card',Dinheiro:'cash'}[form.pay]||'',lines:cart.map(function(l){return {id:l.id,qty:l.qty,note:lineNote(l).slice(0,300),extras:(l.extras||[]).slice()}}),mode:{entrega:'delivery',retirada:'pickup',local:'dine_in'}[form.mode],table:form.mode==='local'?String(form.mesa||'').trim().slice(0,10):'',customer:{name:form.name.trim(),phone:String(form.phone||'').trim()},address:form.mode==='entrega'?form.address.trim():'',neighborhood:form.mode==='entrega'?form.bairro.trim():'',notes:(form.notes.trim()?form.notes.trim()+' · ':'')+'Pagamento: '+payText()}}
 async function getQuote(){
   quote=null;var input=orderInput();
   try{var q=await apiCall('quote',input);quote={input:input,q:q};
     $('quoteBox').innerHTML='<div class="sum"><div><span>Produtos</span><span>'+money(q.subtotal)+'</span></div>'+(input.mode==='delivery'?'<div class="muted"><span>Entrega</span><span>'+(q.fee==null?'o restaurante informa':money(q.fee))+'</span></div>':'')+'<div class="tot"><span>Total</span><span>'+(q.fee==null&&input.mode==='delivery'?money(q.subtotal)+' + entrega':money(q.total!=null?q.total:q.subtotal))+'</span></div></div>'+(q.fee==null&&input.mode==='delivery'?'<p class="paused" style="margin-top:8px">O restaurante vai informar a taxa de entrega. Você aceita o valor no acompanhamento antes do preparo.</p>':'');
-    var b=$('sendBtn');if(b)b.disabled=false;
+    if(proofFlow())renderPixBox(q.total);updSend();
   }catch(err){$('quoteBox').innerHTML='';$('sendErr').textContent=err.message}
 }
 async function sendOrder(btn){
   if(!quote)return;btn.disabled=true;btn.textContent='Enviando…';$('sendErr').textContent='';
   var key;try{var old=JSON.parse(sessionStorage.getItem('xleo-key')||'null');key=old&&old.sig===quote.q.signature?old.key:null}catch(e){}
   key=key||(crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random());try{sessionStorage.setItem('xleo-key',JSON.stringify({sig:quote.q.signature,key:key}))}catch(e){}
-  try{var payload=Object.assign({},quote.input,{quote:quote.q.signature,key:key});var o=await apiCall('orders',payload);
+  try{var payload=Object.assign({},quote.input,{quote:quote.q.signature,key:key});var o=proofFlow()?await sendWithProof(payload):await apiCall('orders',payload);
+    if(proofFlow())clearProof();
     try{sessionStorage.removeItem('xleo-key')}catch(e){}saveLast();cart=[];persist();refresh();
     /* pedido sem login: o servidor devolve um código de acesso (token) só deste pedido */
     if(o.token){rememberOrder(o);location.href='/pedido.html?id='+encodeURIComponent(o.id)+'&t='+encodeURIComponent(o.token)}
     else location.href='/pedido.html?id='+encodeURIComponent(o.id)}
   catch(err){
-    btn.disabled=false;btn.textContent='Confirmar pedido';
+    btn.textContent='Finalizar pedido';
+    /* comprovante recusado pelo servidor (tipo ou tamanho): o erro aparece no campo do comprovante */
+    if(proofFlow()&&(err.status===413||err.status===415||(err.status===422&&/comprovante/i.test(err.message)))){clearProof();renderProof();proofError(err.message);updSend();return}
+    updSend();
     $('sendErr').textContent=err.message+(err.status===409?'':' Se preferir, use o botão do WhatsApp abaixo.');
     if(err.status===409)getQuote()}
 }
@@ -720,6 +807,7 @@ $('bagSheet').addEventListener('input',readForm);$('bagSheet').addEventListener(
   var b=e.target.closest&&e.target.closest('#fModes [data-mode]');if(!b||['ArrowDown','ArrowRight','ArrowUp','ArrowLeft'].indexOf(e.key)<0)return;
   e.preventDefault();var all=[].slice.call($('fModes').querySelectorAll('[data-mode]:not(:disabled)')),i=all.indexOf(b),n=all[(i+(e.key==='ArrowDown'||e.key==='ArrowRight'?1:all.length-1))%all.length];n.click()});
 $('bagSheet').addEventListener('change',function(e){
+  if(e.target.matches&&e.target.matches('[data-proof]')){var f=e.target.files&&e.target.files[0];e.target.value='';if(f)pickProof(f);return}
   if(e.target.id==='fBairroSel'){readForm();if(e.target.value==='__outro'){form.bairroOutro=true;form.bairro=''}persist();renderBag();var t=$('fBairro')||$('fBairroSel');if(t)t.focus();return}
   if(e.target.tagName==='SELECT')readForm()});
 $('bagSheet').addEventListener('click',function(e){
@@ -729,6 +817,8 @@ $('bagSheet').addEventListener('click',function(e){
   if(t.dataset.rm!==undefined){cart.splice(+t.dataset.rm,1);persist();refresh();renderBag();return}
   if(t.dataset.mode){readForm();form.mode=t.dataset.mode;persist();renderBag();var mb=$('fModes')&&$('fModes').querySelector('[data-mode="'+form.mode+'"]');if(mb)mb.focus();return}
   if(t.dataset.pay){readForm();form.pay=t.dataset.pay;persist();renderBag();return}
+  if(t.dataset.act==='copykey'){copyKey(t);return}
+  if(t.dataset.act==='rmproof'){clearProof();renderProof();updSend();return}
   if(t.id==='waLink'){saveLast();setTimeout(function(){step='enviado';renderBag()},300);return}
   if(t.dataset.up&&choiceFor(byId[t.dataset.up])){var uid=t.dataset.up;closeAll();openItem(uid,true);return}
   if(t.dataset.up){var u=t.dataset.up,ex=cart.find(function(l){return l.id===u&&!l.note&&!(l.remove||[]).length&&!(l.extras||[]).length});
