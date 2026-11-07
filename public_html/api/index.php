@@ -209,8 +209,18 @@ function compute(array $in, array $s): array {
     $c = (array) ($in['customer'] ?? []); $name = str($c['name'] ?? '', 80); $phone = str($c['phone'] ?? '', 30);
     if ($name === '') fail(422, 'Informe seu nome.');
     $digits = preg_replace('/\D/', '', $phone); if (strlen($digits) < 10 || strlen($digits) > 13) fail(422, 'Informe um telefone com DDD.');
-    $address = $mode === 'delivery' ? str($in['address'] ?? '', 200) : ''; $nb = $mode === 'delivery' ? str($in['neighborhood'] ?? '', 100) : '';
-    if ($mode === 'delivery' && (mb_strlen($address) < 3 || $nb === '')) fail(422, 'Informe endereço e bairro.');
+    /* endereço em campos: rua, número (ou S/N), complemento e referência; "address" continua sendo a linha pronta (rua, número - complemento) */
+    $nb = $mode === 'delivery' ? str($in['neighborhood'] ?? '', 100) : ''; $addr = null; $address = '';
+    if ($mode === 'delivery') {
+        if (!is_array($in['addr'] ?? null)) fail(422, 'O site foi atualizado. Recarregue a página e confira o endereço.');
+        $a = $in['addr'];
+        $street = str($a['street'] ?? '', 150); $number = !empty($a['noNumber']) ? 'S/N' : str($a['number'] ?? '', 12);
+        $addr = ['street' => $street, 'number' => $number, 'complement' => str($a['complement'] ?? '', 100), 'reference' => str($a['reference'] ?? '', 150)];
+        if (mb_strlen($street) < 3) fail(422, 'Informe a rua ou avenida.');
+        if ($number === '') fail(422, 'Informe o número da casa.');
+        if ($nb === '') fail(422, 'Informe o bairro.');
+        $address = $street . ', ' . $number . ($addr['complement'] !== '' ? ' - ' . $addr['complement'] : '');
+    }
     $byId = []; foreach ($s['products'] as $p) $byId[$p['id']] = $p;
     $lines = []; $sub = 0; $raw = array_slice((array) ($in['lines'] ?? []), 0, 51);
     if (!$raw) fail(422, 'A sacola está vazia.'); if (count($raw) > 50) fail(422, 'Itens demais em um pedido.');
@@ -238,7 +248,7 @@ function compute(array $in, array $s): array {
     /* forma de pagamento: pix | card | cash ('' em pedidos de versões antigas da loja) */
     $pay = in_array($in['pay'] ?? '', ['pix', 'card', 'cash'], true) ? $in['pay'] : '';
     if ($pay === 'pix' && $mode === 'delivery' && $fee === null) fail(409, 'Para outros bairros, pague na entrega.');
-    return ['mode' => $mode, 'table' => $table, 'pay' => $pay, 'customer' => ['name' => $name, 'phone' => $phone], 'address' => $address, 'neighborhood' => $nb,
+    return ['mode' => $mode, 'table' => $table, 'pay' => $pay, 'customer' => ['name' => $name, 'phone' => $phone], 'address' => $address, 'addr' => $addr, 'neighborhood' => $nb,
         'notes' => str($in['notes'] ?? '', 600), 'lines' => $lines, 'subtotal' => $sub, 'fee' => $fee];
 }
 function quoteSig(array $q, int $exp): string { return $exp . '.' . hmac('quote.' . $exp . '.' . json_encode($q, JSON_UNESCAPED_UNICODE)); }
@@ -366,7 +376,7 @@ try {
         $id = bin2hex(random_bytes(12)); $ms = nowMs();
         $o = ['id' => $id, 'number' => '', 'created' => iso($ms), 'status' => 'received', 'payment' => $needProof ? 'review' : 'pending', 'fee' => $q['fee'],
             'fee_approved' => $q['fee'] !== null, 'cancelReason' => '', 'payMethod' => $q['pay'], 'version' => 1,
-            'snapshot' => ['customer' => $q['customer'], 'mode' => $q['mode'], 'table' => $q['table'], 'address' => $q['address'], 'neighborhood' => $q['neighborhood'], 'notes' => $q['notes'], 'lines' => $q['lines'], 'subtotal' => $q['subtotal']]];
+            'snapshot' => ['customer' => $q['customer'], 'mode' => $q['mode'], 'table' => $q['table'], 'address' => $q['address'], 'addr' => $q['addr'], 'neighborhood' => $q['neighborhood'], 'notes' => $q['notes'], 'lines' => $q['lines'], 'subtotal' => $q['subtotal']]];
         $pdo = db(); $pdo->beginTransaction();
         $pdo->prepare('INSERT INTO orders (id, created_ts, idem, version, data) VALUES (?, ?, ?, 1, ?)')->execute([$id, $ms, $key, '{}']);
         $num = (int) $pdo->lastInsertId(); $o['number'] = '#' . $num;

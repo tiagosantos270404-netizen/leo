@@ -38,6 +38,8 @@ p{margin:0}
 button,input,select,textarea{font:inherit;color:inherit}
 :focus-visible{outline:3px solid var(--cheddar);outline-offset:2px}
 .num{font-variant-numeric:tabular-nums}
+.addr-n{font-size:1.25em;font-weight:800;color:var(--brasa,#F7931E)}
+.addr-ref{font-size:13.5px;color:var(--muted)}
 .muted{color:var(--muted)}
 
 /* Topo */
@@ -473,11 +475,18 @@ function ticketDoc(title,inner){
     '.mode{background:#000;color:#fff;font-size:19px;font-weight:900;padding:1.5mm;margin:2mm 0;text-align:center;letter-spacing:.08em}'+
     'hr{border:0;border-top:2px dashed #000;margin:2.5mm 0}.r{display:flex;justify-content:space-between;gap:3mm}'+
     '.it{margin:0 0 2.2mm}.it .r b{font-size:16px}.sub{padding-left:6mm;font-size:13px}.obs{padding-left:6mm;font-size:15px;font-weight:900}'+
-    '.big{font-size:15px}.tot{font-size:19px;font-weight:900}.box{border:2px solid #000;padding:1.5mm;margin:2mm 0;font-size:15px;font-weight:900}'+
+    '.big{font-size:15px}.addr-n{font-size:22px;font-weight:900}.addr-ref{font-size:14px}.tot{font-size:19px;font-weight:900}.box{border:2px solid #000;padding:1.5mm;margin:2mm 0;font-size:15px;font-weight:900}'+
     '</style></head><body><div class="brand">LÉO RESTAURANTE &amp; LANCHERIA</div>'+inner+'</body></html>';
 }
 /* tipo de pedido (pedidos antigos só têm delivery/pickup; pickup = retirar no balcão, para levar) */
 function modeName(s){return {delivery:'Entrega',pickup:'Para levar',dine_in:'Comer no local'}[s.mode]||'Para levar'}
+/* endereço em uma linha com o número em destaque e a referência embaixo; pedidos antigos (texto único) aparecem como antes */
+function addrHTML(s,cls){
+  var a=s.addr;
+  if(!a||!a.street)return '<p'+(cls?' class="'+cls+'"':'')+'>'+esc(s.address)+' — '+esc(s.neighborhood)+'</p>';
+  return '<p'+(cls?' class="'+cls+'"':'')+'>'+esc(a.street)+', <b class="addr-n">'+esc(a.number)+'</b>'+(a.complement?' - '+esc(a.complement):'')+' - '+esc(s.neighborhood)+'</p>'+
+    (a.reference?'<p class="addr-ref">Ref.: '+esc(a.reference)+'</p>':'');
+}
 function tableOf(s){return s.mode==='dine_in'&&String(s.table||'').trim()?String(s.table).trim():''}
 function typeBanner(s){var t=tableOf(s);return '<div class="otype t-'+(s.mode==='delivery'||s.mode==='dine_in'?s.mode:'pickup')+'"><span>'+modeName(s)+'</span>'+(t?'<small>Mesa '+esc(t)+'</small>':'')+'</div>'}
 function ticketHTML(o){
@@ -486,7 +495,7 @@ function ticketHTML(o){
   var h='<div class="mode" style="font-size:24px;padding:2.5mm 1.5mm">'+esc(modeName(s).toUpperCase())+(t?'<br>MESA '+esc(t.toUpperCase()):'')+'</div>'+
     '<div class="num">PEDIDO '+esc(o.number)+'</div><p class="c">'+fmtDate.format(new Date(o.created))+'</p>'+
     '<p class="big">'+esc(s.customer.name)+'</p><p>Tel.: '+esc(String(s.customer.phone||'').replace(/\D/g,'').replace(/^55(?=\d{10,11}$)/,'').replace(/^(\d{2})(\d{4,5})(\d{4})$/,'($1) $2-$3'))+'</p>'+
-    (del?'<p class="big">'+esc(s.address)+'</p><p>Bairro: '+esc(s.neighborhood)+'</p>':'')+'<hr>'+
+    (del?addrHTML(s,'big'):'')+'<hr>'+
     s.lines.map(function(l){return '<div class="it">'+r('<b>'+l.qty+'x '+esc(l.name)+'</b>',money(l.total))+
       (l.extras&&l.extras.length?l.extras.map(function(x){return '<div class="sub">+ '+esc(x.name)+'</div>'}).join(''):'')+
       (l.note?'<div class="obs">OBS: '+esc(l.note)+'</div>':'')+'</div>'}).join('')+
@@ -561,7 +570,7 @@ function cardHTML(o){
   return '<article class="ocard" data-s="'+o.status+'" data-pay="'+o.payment+'">'+typeBanner(s)+(needsPixCheck(o)?'<div class="hint">Pix com comprovante: confira e confirme para liberar o preparo</div>':'')+
     '<div class="head"><h3>'+esc(o.number)+'</h3><span class="when">'+ago(o.created)+'</span></div>'+
     '<div class="pills"><span class="pill p-'+o.status+'">'+stageNames[o.status]+'</span><span class="pill p-'+o.payment+'">'+payNames[o.payment]+'</span></div>'+
-    '<div><div class="who">'+esc(s.customer.name)+'</div>'+(s.mode==='delivery'?'<div class="muted" style="font-size:13.5px">'+esc(s.neighborhood)+'</div>':'')+'</div>'+
+    '<div><div class="who">'+esc(s.customer.name)+'</div>'+(s.mode==='delivery'?'<div class="muted" style="font-size:13.5px">'+(s.addr&&s.addr.street?esc(s.addr.street)+', <b style="color:var(--carvao,inherit)">'+esc(s.addr.number)+'</b> - ':'')+esc(s.neighborhood)+'</div>':'')+'</div>'+
     '<div class="items">'+items+'</div>'+
     (blocked&&s.mode==='delivery'&&o.status==='received'?'<div class="hint">'+(o.fee===null?'Defina o frete para liberar o preparo':'Aguardando o cliente aceitar o frete')+'</div>':'')+
     '<div class="foot"><span class="tot">'+(o.fee===null&&s.mode==='delivery'?money(s.subtotal)+' + frete':money(total(o)))+'</span></div>'+
@@ -620,7 +629,7 @@ function drawOrder(keepOpen){
   var o=cur.o,s=o.snapshot;
   var body=typeBanner(s)+'<div class="pills"><span class="pill p-'+o.status+'">'+stageNames[o.status]+'</span><span class="pill p-'+o.payment+'">'+payNames[o.payment]+'</span></div>'+'<!--proof-->'+
     (o.status==='cancelled'&&reasonOf(o)?'<p class="note">Motivo do cancelamento: '+esc(reasonOf(o))+'</p>':'')+
-    '<div class="box"><h3>Cliente</h3><p><b>'+esc(s.customer.name)+'</b> · <span class="num">'+esc(s.customer.phone)+'</span></p>'+(s.mode==='delivery'?'<p>'+esc(s.address)+' — '+esc(s.neighborhood)+'</p>':s.mode==='dine_in'?'<p class="muted">Come no restaurante'+(tableOf(s)?' · mesa '+esc(tableOf(s)):'')+'</p>':'<p class="muted">Retira no balcão (para levar)</p>')+'<p class="muted" style="font-size:13px">Feito em '+fmtDate.format(new Date(o.created))+'</p></div>'+
+    '<div class="box"><h3>Cliente</h3><p><b>'+esc(s.customer.name)+'</b> · <span class="num">'+esc(s.customer.phone)+'</span></p>'+(s.mode==='delivery'?addrHTML(s):s.mode==='dine_in'?'<p class="muted">Come no restaurante'+(tableOf(s)?' · mesa '+esc(tableOf(s)):'')+'</p>':'<p class="muted">Retira no balcão (para levar)</p>')+'<p class="muted" style="font-size:13px">Feito em '+fmtDate.format(new Date(o.created))+'</p></div>'+
     '<div class="box"><h3>Itens</h3><div class="lines">'+s.lines.map(function(l){return '<div class="line"><b>'+l.qty+'× '+esc(l.name)+'</b><span class="num">'+money(l.total)+'</span>'+(l.extras&&l.extras.length?'<small>+ '+l.extras.map(function(x){return esc(x.name)}).join(', ')+'</small>':'')+(l.note?'<small>Obs.: '+esc(l.note)+'</small>':'')+'</div>'}).join('')+'</div>'+(s.notes?'<p class="note" style="margin-top:6px">Obs. do pedido: '+esc(s.notes)+'</p>':'')+'</div>'+
     '<div class="box totals"><div><span>Produtos</span><span>'+money(s.subtotal)+'</span></div><div><span>Entrega</span><span>'+(s.mode!=='delivery'?'—':money(o.fee))+'</span></div><div class="big"><span>Total</span><span>'+(o.fee===null&&s.mode==='delivery'?'a definir':money(total(o)))+'</span></div></div>';
   if(s.mode==='delivery'&&!o.fee_approved)body+='<p class="note">'+(o.fee===null?'Informe o frete abaixo. O cliente aceita o valor no acompanhamento e só então o preparo é liberado.':'Frete de '+money(o.fee)+' enviado. Aguardando o cliente aceitar.')+'</p>';
@@ -903,7 +912,7 @@ function demoSeed(){
   var products=[];G.forEach(function(g,gi){g.forEach(function(p,pi){products.push({id:gi+'-'+pi,name:p[0],description:p[2]||'',group:gi,price:p[1],available:!(gi===5&&pi===4),extras:gi===0?[{id:'ovo',name:'Ovo extra',price:300,available:true},{id:'bacon',name:'Bacon extra',price:600,available:true}]:[]})})});
   var now=Date.now(),min=60000,P=function(id){return products.find(function(p){return p.id===id})};
   function mk(n,ago,status,payment,mode,name,phone,nb,lines,fee,feeOk,notes){var sub=0;var ls=lines.map(function(l){var p=P(l[0]);var t=p.price*l[1];sub+=t;return {id:p.id,name:p.name,qty:l[1],total:t,extras:[],note:l[2]||''}});
-    return {id:'demo-'+n,number:'#'+n,created:new Date(now-ago*min).toISOString(),status:status,payment:payment,fee:mode==='pickup'?0:fee,fee_approved:mode==='pickup'?true:feeOk,version:1,snapshot:{customer:{name:name,phone:phone},mode:mode,address:mode==='delivery'?'Rua General Osório, 210':'',neighborhood:nb||'',lines:ls,subtotal:sub,notes:notes||''}}}
+    return {id:'demo-'+n,number:'#'+n,created:new Date(now-ago*min).toISOString(),status:status,payment:payment,fee:mode==='pickup'?0:fee,fee_approved:mode==='pickup'?true:feeOk,version:1,snapshot:{customer:{name:name,phone:phone},mode:mode,address:mode==='delivery'?'Rua General Osório, 210':'',addr:mode==='delivery'&&n!==1044?{street:'Rua General Osório',number:n===1046?'S/N':'210',complement:n===1048?'Apto 2':'',reference:n===1048?'Perto do mercado, portão verde':''}:null,neighborhood:nb||'',lines:ls,subtotal:sub,notes:notes||''}}}
   var orders=[
     mk(1048,2,'received','pending','delivery','Mariana S.','(51) 99812-4410','Centro',[['0-2',2,'sem ervilha'],['3-3',1],['6-5',1]],null,false),
     mk(1047,6,'received','pending','pickup','Carlos R.','(51) 98455-1203','',[['0-7',1],['6-1',1]]),
