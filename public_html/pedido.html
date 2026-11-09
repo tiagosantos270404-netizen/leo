@@ -126,8 +126,9 @@ function render(){
   document.title='Pedido '+o.number+' · '+titles[o.status];
   $('kicker').textContent='Pedido '+o.number+' · feito às '+fmtTime.format(new Date(o.created));
   $('title').textContent=titles[o.status];$('subtitle').textContent=subtitle(o);
-  if(o.proof&&o.status==='received'&&o.payment==='review'){$('title').textContent='Aguardando confirmação';$('subtitle').textContent='Assim que o Léo confirmar o Pix, teu pedido entra em preparo.'}
-  if(o.proof&&o.status==='received'&&o.payment==='rejected'){$('title').textContent='Pagamento recusado';$('subtitle').textContent='Fale com o Léo pelo WhatsApp para resolver.'}
+  // Pix não trava mais o pedido: o andamento segue normal e o Léo confere o pagamento depois
+  if(o.payment==='review'&&o.status!=='cancelled')$('subtitle').textContent=subtitle(o)+' Teu Pix está em conferência.';
+  if(o.payment==='rejected'&&o.status!=='cancelled'){$('title').textContent='Pix não identificado';$('subtitle').textContent='Fale com o Léo pelo WhatsApp para resolver.'}
   // almoço agendado: hora que o cliente escolheu
   var lt=s.lunch&&s.lunch.time,lw=$('lunchWhen');
   if(lt&&['completed','cancelled'].indexOf(o.status)<0){lw.hidden=false;lw.innerHTML='Teu almoço será <b>'+(s.mode==='delivery'?'entregue':s.mode==='dine_in'?'servido':'retirado')+'</b> '+(lt==='asap'?'o quanto antes, a partir das 11:30':'às <b>'+esc(lt)+'</b>')+'.'}else lw.hidden=true;
@@ -142,8 +143,8 @@ function render(){
   /* Pix com comprovante enviado pelo site */
   var pc=$('payCard');
   if(o.proof&&o.status!=='cancelled'&&(o.payment==='review'||o.payment==='rejected')){pc.hidden=false;
-    pc.innerHTML=o.payment==='review'?'<h2>Comprovante recebido</h2><p class="okmsg">Recebemos teu comprovante! Assim que o pagamento for confirmado, teu pedido entra em preparo.</p><p class="muted" style="font-size:14px">Status: Aguardando confirmação do pagamento. Esta página atualiza sozinha.</p>':
-      '<h2>Pagamento recusado</h2><p class="note">O Léo não conseguiu confirmar o teu Pix'+(o.payReason?': '+esc(o.payReason):'')+'.</p><a class="btn btn-primary" href="https://wa.me/5551996200841?text='+encodeURIComponent('Olá! Meu Pix do pedido '+o.number+' foi recusado. Pode me ajudar?')+'" target="_blank" rel="noopener">Falar com o Léo no WhatsApp</a>'}
+    pc.innerHTML=o.payment==='review'?'<h2>Comprovante recebido</h2><p class="okmsg">Recebemos teu comprovante! Teu pedido já está com o Léo.</p><p class="muted" style="font-size:14px">Pix em conferência. Esta página atualiza sozinha.</p>':
+      '<h2>Pix não identificado</h2><p class="note">O Léo não encontrou o teu Pix'+(o.payReason?': '+esc(o.payReason):'')+'.</p><a class="btn btn-primary" href="https://wa.me/5551996200841?text='+encodeURIComponent('Olá! Meu Pix do pedido '+o.number+' não foi identificado. Pode me ajudar?')+'" target="_blank" rel="noopener">Falar com o Léo no WhatsApp</a>'}
   else pc.hidden=true;
   // etapas
   var flow=s.mode==='delivery'?['received','preparing','ready','out_for_delivery','completed']:['received','preparing','ready','completed'];

@@ -420,9 +420,10 @@ try {
         // Pix com chave cadastrada no painel: o comprovante é obrigatório e vai junto com o pedido
         $s = settings(); $needProof = $q['pay'] === 'pix' && !empty($s['pix']['key']);
         $mime = $needProof ? checkProof($_FILES['proof'] ?? null) : '';
+        $origin = ($b['origin'] ?? '') === 'whatsapp' ? 'whatsapp' : 'site';
         $id = bin2hex(random_bytes(12)); $ms = nowMs();
         $o = ['id' => $id, 'number' => '', 'created' => iso($ms), 'status' => 'received', 'payment' => $needProof ? 'review' : 'pending', 'fee' => $q['fee'],
-            'fee_approved' => true, 'cancelReason' => '', 'payMethod' => $q['pay'], 'version' => 1,
+            'fee_approved' => true, 'cancelReason' => '', 'payMethod' => $q['pay'], 'origin' => $origin, 'version' => 1,
             'snapshot' => ['customer' => $q['customer'], 'mode' => $q['mode'], 'table' => $q['table'], 'address' => $q['address'], 'addr' => $q['addr'], 'neighborhood' => $q['neighborhood'], 'lunch' => $q['lunch'], 'notes' => $q['notes'], 'lines' => $q['lines'], 'subtotal' => $q['subtotal']]];
         $pdo = db(); $pdo->beginTransaction();
         $pdo->prepare('INSERT INTO orders (id, created_ts, idem, version, data) VALUES (?, ?, ?, 1, ?)')->execute([$id, $ms, $key, '{}']);
@@ -473,15 +474,16 @@ try {
                 $next = ['received' => ['preparing', 'cancelled'], 'preparing' => ['ready', 'cancelled'], 'ready' => $del ? ['out_for_delivery', 'cancelled'] : ['completed', 'cancelled'],
                     'out_for_delivery' => ['completed', 'cancelled'], 'completed' => [], 'cancelled' => []][$o['status']];
                 if (!in_array($val, $next, true)) { $pdo->rollBack(); fail(409, 'Mudança de andamento não permitida.'); }
-                if ($val !== 'cancelled' && isset($o['proof']) && $o['payment'] !== 'approved') { $pdo->rollBack(); fail(409, 'Confirme o pagamento do Pix antes de iniciar o preparo.'); }
                 $o['status'] = $val; if ($val === 'cancelled') $o['cancelReason'] = str($b['reason'] ?? '', 140);
             } elseif ($act === 'payment') {
-                $next = ['pending' => ['approved', 'rejected', 'expired'], 'review' => ['approved', 'rejected'], 'approved' => ['refunded'], 'rejected' => ['pending'], 'expired' => ['pending'], 'refunded' => []][$o['payment']] ?? [];
+                $next = ['pending' => ['approved', 'rejected', 'expired'], 'review' => ['approved', 'rejected'], 'approved' => ['refunded'], 'rejected' => ['pending', 'approved'], 'expired' => ['pending'], 'refunded' => []][$o['payment']] ?? [];
                 if (!in_array($val, $next, true) || ($val === 'approved' && $o['status'] === 'cancelled')) { $pdo->rollBack(); fail(409, 'Mudança de pagamento não permitida.'); }
                 $wasReview = $o['payment'] === 'review'; $o['payment'] = $val;
                 if ($val === 'rejected') $o['payReason'] = str($b['reason'] ?? '', 140);
-                // Pix confirmado pelo Léo: o pedido vai direto para o preparo
-                if ($wasReview && $val === 'approved' && $o['status'] === 'received') $o['status'] = 'preparing';
+                // "Pix não caiu": o Léo pode cancelar o pedido junto
+                if ($val === 'rejected' && !empty($b['cancel']) && !in_array($o['status'], ['completed', 'cancelled'], true)) {
+                    $o['status'] = 'cancelled'; $o['cancelReason'] = $o['payReason'] !== '' ? $o['payReason'] : 'Pix não identificado';
+                }
             } elseif ($act === 'fee') {
                 if (!$del || in_array($o['status'], ['completed', 'cancelled'], true) || $o['payment'] === 'approved') { $pdo->rollBack(); fail(409, 'Não dá para mudar o frete agora.'); }
                 $o['fee'] = cents($val, 100000); $o['fee_approved'] = true;

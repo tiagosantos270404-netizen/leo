@@ -660,8 +660,8 @@ function bairroHTML(){
     '<span class="err" id="eBairro" hidden>Informe o bairro</span></div>';
 }
 function renderBag(){
-  var body=$('bagBody'),foot=$('bagFoot');$('bagBack').hidden=(step==='bag'||step==='enviado');
-  $('bagTitle').textContent={bag:'Sua sacola',dados:'Seus dados',revisar:'Revisar pedido',enviado:'Quase lá!'}[step];
+  var body=$('bagBody'),foot=$('bagFoot');$('bagBack').hidden=(step==='bag'||step==='enviado'||step==='wasalvo');
+  $('bagTitle').textContent={bag:'Sua sacola',dados:'Seus dados',revisar:'Revisar pedido',enviado:'Quase lá!',wasalvo:'Pedido salvo'}[step];
   if(step==='bag'){
     if(!cart.length){body.innerHTML='<div class="empty-bag">'+icons[0]+'<b style="color:var(--carvao);font-size:18px">Sua sacola está vazia</b><p>Escolha um X, uma minuta ou uma porção de fritas para começar.</p></div>';foot.innerHTML='<button class="btn btn-ghost" data-act="close">Ver cardápio</button>';return}
     var lonelyBife=cart.some(function(l){return /bife adicional/i.test(byId[l.id].name)})&&!cart.some(function(l){var p=byId[l.id];return p.group===MINUTA&&!/bife adicional/i.test(p.name)});
@@ -694,8 +694,13 @@ function renderBag(){
     body.innerHTML=stepsHTML()+lunchConfirmHTML()+addrConfirmHTML()+'<div id="quoteBox"><p class="muted">Calculando o total com o restaurante…</p></div>'+(proofFlow()?'<div id="pixBox" hidden></div>':'')+
       '<div class="box-lines">'+cart.map(function(l){var p=byId[l.id],d=lineDesc(l);return '<div class="line"><h4>'+l.qty+'× '+(p.group===MINUTA?'Minuta ':'')+esc(p.name)+'</h4><span class="lp">'+money(linePrice(l)*l.qty)+'</span>'+(d?'<span class="note">'+esc(d)+'</span>':'')+'</div>'}).join('')+'</div>'+
       '<p style="font-size:14px;color:var(--muted)">'+esc(form.name)+' · '+esc(form.phone)+'<br>'+esc(modeText())+'<br>Pagamento: '+esc(payText())+'</p><p class="err" id="sendErr" role="alert"></p>';
-    foot.innerHTML='<button class="btn btn-primary" data-act="send" id="sendBtn" disabled>Finalizar pedido</button>'+waBtn('btn-ghost','Prefiro enviar pelo WhatsApp');
+    foot.innerHTML='<button class="btn btn-primary" data-act="send" id="sendBtn" disabled>Finalizar pedido</button><button class="btn btn-ghost" data-act="sendwa" id="waSendBtn" disabled>Enviar pelo WhatsApp</button>';
     getQuote();
+  } else if(step==='wasalvo'&&waDone){
+    var wo=waDone.o,trk=wo.token?'/pedido.html?id='+encodeURIComponent(wo.id)+'&t='+encodeURIComponent(wo.token):'';
+    body.innerHTML='<div class="done"><div class="ok"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg></div>'+
+      '<h3 style="font-size:24px">Pedido '+esc(wo.number)+' salvo</h3><p style="color:var(--muted);max-width:34ch">O WhatsApp abriu com a mensagem pronta. É só tocar em enviar por lá.</p></div>';
+    foot.innerHTML='<a class="btn btn-wa" href="'+esc(waDone.url)+'" target="_blank" rel="noopener">Abrir o WhatsApp de novo</a>'+(trk?'<a class="btn btn-primary" href="'+trk+'">Acompanhar o pedido</a>':'')+'<button class="btn btn-ghost" data-act="new">Fazer novo pedido</button>';
   } else if(step==='revisar'){
     body.innerHTML=stepsHTML()+lunchConfirmHTML()+addrConfirmHTML()+sumHTML()+'<div class="field"><span class="lbl">Mensagem que vai para o Léo</span><div class="preview" id="pv">'+esc(message())+'</div></div>'+
       '<p style="font-size:13.5px;color:var(--muted)">Ao tocar no botão, o WhatsApp abre com o pedido já escrito. É só apertar enviar por lá. O restaurante confirma o pedido e a taxa de entrega.</p>';
@@ -775,7 +780,7 @@ function renderPixBox(total){
       '<div class="proofbtns"><label class="btn btn-ghost">Tirar foto<input type="file" class="sr" accept="image/*" capture="environment" data-proof aria-label="Tirar foto do comprovante"></label>'+
       '<label class="btn btn-ghost">Galeria ou PDF<input type="file" class="sr" accept="image/jpeg,image/png,application/pdf,image/*" data-proof aria-label="Escolher comprovante da galeria ou PDF"></label></div>'+
       '<div id="proofPrev"></div><span class="err" id="proofErr" role="alert" hidden></span></div>'+
-    '<p class="hint" id="proofHint">Depois de pagar no app do banco, anexe o comprovante para liberar o botão Finalizar pedido.</p></div>';
+    '<p class="hint" id="proofHint">Anexe o comprovante do Pix: depois de pagar no app do banco, anexe aqui para liberar os botões Finalizar pedido e Enviar pelo WhatsApp.</p></div>';
   renderProof();
 }
 function renderProof(){
@@ -786,7 +791,7 @@ function renderProof(){
 }
 function proofError(m){var e=$('proofErr');if(e){e.textContent=m;e.hidden=!m}}
 function clearProof(){if(proof&&proof.url)URL.revokeObjectURL(proof.url);proof=null}
-function updSend(){var b=$('sendBtn');if(b)b.disabled=!quote||(proofFlow()&&!proof)}
+function updSend(){var off=!quote||(proofFlow()&&!proof);['sendBtn','waSendBtn'].forEach(function(id){var b=$(id);if(b&&!b.dataset.busy)b.disabled=off})}
 /* reduz fotos grandes (ou em formato que o servidor não aceita, como HEIC) para JPEG */
 function toJpeg(file,maxSide,quality){return new Promise(function(res,rej){
   var u=URL.createObjectURL(file),img=new Image();
@@ -832,22 +837,51 @@ async function getQuote(){
     if(proofFlow())renderPixBox(q.total);updSend();
   }catch(err){$('quoteBox').innerHTML='';$('sendErr').textContent=err.message}
 }
-async function sendOrder(btn){
-  if(!quote)return;btn.disabled=true;btn.textContent='Enviando…';$('sendErr').textContent='';
+/* pedido pelo botão do WhatsApp: salva no sistema (origem WhatsApp) e só então abre o WhatsApp com o número do pedido e o total */
+function waOrderMessage(o,q,input){
+  var del=input.mode==='delivery',L=['Olá, Léo! Fiz o *Pedido '+o.number+'* pelo site:',''];
+  cart.forEach(function(l){var p=byId[l.id],n=lineNote(l);
+    L.push(l.qty+'x '+(p.group===MINUTA?'À la minuta — ':'')+p.name+' — '+money(linePrice(l)*l.qty));
+    extrasOf(l).forEach(function(x){L.push('   + '+x.name)});if(n)L.push('   Obs.: '+n)});
+  L.push('','Produtos: '+money(q.subtotal));
+  if(del)L.push('Entrega: '+(q.fee==null?'a combinar':money(q.fee)));
+  L.push('*Total: '+(del&&q.fee==null?money(q.subtotal)+' + entrega':money(q.total!=null?q.total:q.subtotal))+'*','');
+  L.push('Nome: '+form.name.trim());if(String(form.phone||'').trim())L.push('Telefone: '+form.phone.trim());
+  if(del){L.push('Entrega em: '+addrLine());if(String(form.ref||'').trim())L.push('Referência: '+form.ref.trim())}else L.push(modeText());
+  if(cartHasLunch()&&form.lunchTime)L.push('Almoço para: '+lunchLabel(form.lunchTime));
+  L.push('Pagamento: '+payText()+(form.pay==='Pix'?' (comprovante anexado no site)':''));
+  if(form.notes.trim())L.push('Observações: '+form.notes.trim());
+  if(o.token)L.push('','Acompanhar: '+location.origin+'/pedido.html?id='+encodeURIComponent(o.id)+'&t='+encodeURIComponent(o.token));
+  return L.join('\n');
+}
+var waDone=null; // último pedido salvo pelo botão do WhatsApp (para reabrir o WhatsApp)
+async function sendOrder(btn,origin){
+  if(!quote||btn.dataset.busy)return;var viaWa=origin==='whatsapp';
+  if(proofFlow()&&!proof){proofError('Anexe o comprovante do Pix para continuar.');return}
+  ['sendBtn','waSendBtn'].forEach(function(id){var b=$(id);if(b){b.disabled=true;b.dataset.busy='1'}});
+  btn.textContent=viaWa?'Salvando pedido…':'Enviando…';$('sendErr').textContent='';
+  /* o celular bloqueia abrir o WhatsApp depois de uma espera: a aba abre já no toque e só recebe o endereço depois de salvo */
+  var w=null;if(viaWa){try{w=window.open('','_blank');if(w)w.document.write('<p style="font:16px sans-serif;padding:20px">Salvando o pedido no Léo… o WhatsApp abre em seguida.</p>')}catch(e){w=null}}
   var key;try{var old=JSON.parse(sessionStorage.getItem('xleo-key')||'null');key=old&&old.sig===quote.q.signature?old.key:null}catch(e){}
   key=key||(crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random());try{sessionStorage.setItem('xleo-key',JSON.stringify({sig:quote.q.signature,key:key}))}catch(e){}
-  try{var payload=Object.assign({},quote.input,{quote:quote.q.signature,key:key});var o=proofFlow()?await sendWithProof(payload):await apiCall('orders',payload);
+  try{var payload=Object.assign({},quote.input,{quote:quote.q.signature,key:key},viaWa?{origin:'whatsapp'}:{});var o=proofFlow()?await sendWithProof(payload):await apiCall('orders',payload);
     if(proofFlow())clearProof();
+    var waUrl=viaWa?'https://wa.me/'+WA+'?text='+encodeURIComponent(waOrderMessage(o,quote.q,quote.input)):'';
     try{sessionStorage.removeItem('xleo-key')}catch(e){}saveLast();cart=[];form.lunchAware=false;form.lunchTime='';persist();refresh();
+    if(viaWa){if(o.token)rememberOrder(o);showTrack();waDone={o:o,url:waUrl};
+      if(w&&!w.closed)w.location.href=waUrl;else location.href=waUrl;
+      step='wasalvo';renderBag();return}
     /* pedido sem login: o servidor devolve um código de acesso (token) só deste pedido */
     if(o.token){rememberOrder(o);location.href='/pedido.html?id='+encodeURIComponent(o.id)+'&t='+encodeURIComponent(o.token)}
     else location.href='/pedido.html?id='+encodeURIComponent(o.id)}
   catch(err){
-    btn.textContent='Finalizar pedido';
+    if(w)try{w.close()}catch(e){} // erro ao salvar: o WhatsApp não abre
+    ['sendBtn','waSendBtn'].forEach(function(id){var b=$(id);if(b)delete b.dataset.busy});
+    btn.textContent=viaWa?'Enviar pelo WhatsApp':'Finalizar pedido';
     /* comprovante recusado pelo servidor (tipo ou tamanho): o erro aparece no campo do comprovante */
     if(proofFlow()&&(err.status===413||err.status===415||(err.status===422&&/comprovante/i.test(err.message)))){clearProof();renderProof();proofError(err.message);updSend();return}
     updSend();
-    $('sendErr').textContent=err.message+(err.status===409?'':' Se preferir, use o botão do WhatsApp abaixo.');
+    $('sendErr').textContent=(viaWa?'Não foi possível salvar o pedido: ':'')+err.message+(err.status===409||viaWa?'':' Se preferir, use o botão do WhatsApp abaixo.');
     if(err.status===409)getQuote()}
 }
 function myOrders(){try{return JSON.parse(localStorage.getItem('xleo-meus-pedidos')||'[]')}catch(e){return []}}
@@ -900,7 +934,8 @@ $('bagSheet').addEventListener('click',function(e){
     if(ex)ex.qty++;else cart.push({id:u,qty:1,note:'',remove:[],extras:[]});persist();refresh();renderBag();toast(byId[u].name+' na sacola');return}
   var a=t.dataset.act;if(!a)return;
   if(a==='close'){closeAll();return}
-  if(a==='send'){sendOrder(t);return}
+  if(a==='send'){sendOrder(t,'site');return}
+  if(a==='sendwa'){sendOrder(t,'whatsapp');return}
   if(a==='dados'){if(!canOrder()){renderBag();return}step='dados';renderBag();$('bagBody').scrollTop=0;return}
   if(a==='revisar'){readForm();if(step==='dados'&&!validate())return;step='revisar';renderBag();$('bagBody').scrollTop=0;return}
   if(a==='copy'){var txt=message();

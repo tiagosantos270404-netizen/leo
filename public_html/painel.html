@@ -114,6 +114,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--brasa);outline:none}
 .p-pending{background:var(--surface-2);color:var(--muted)}
 /* Pix aguardando confirmação */
 .p-review{background:var(--warn-bg);color:var(--warn)}
+.p-wa{background:#1F8F4E;color:#fff}
 .ocard[data-pay="review"]{box-shadow:0 0 0 2px var(--cor-primaria),var(--shadow)}
 .pixq{background:var(--warn-bg);border:2px solid var(--cor-primaria);border-radius:16px;padding:14px 16px;margin-bottom:16px;display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
 .pixq h2{font-size:20px;font-weight:700;color:var(--cor-primaria)}
@@ -405,7 +406,7 @@ function localDay(d){return new Intl.DateTimeFormat('en-CA',{timeZone:'America/S
 function ago(iso){var m=Math.round((Date.now()-new Date(iso))/60000);return m<1?'agora':m<60?'há '+m+' min':fmtTime.format(new Date(iso))}
 var stageNames={received:'Novo',preparing:'Em preparo',ready:'Pronto',out_for_delivery:'Saiu p/ entrega',completed:'Concluído',cancelled:'Cancelado'};
 var stageAction={preparing:'Iniciar preparo',ready:'Marcar pronto',out_for_delivery:'Saiu p/ entrega',completed:'Concluir',cancelled:'Cancelar'};
-var payNames={pending:'Pagamento pendente',review:'Aguardando confirmação do pagamento',approved:'Pago',rejected:'Pagamento recusado',expired:'Expirado',refunded:'Reembolsado'};
+var payNames={pending:'Pagamento pendente',review:'Pix a conferir',approved:'Pago',rejected:'Pagamento recusado',expired:'Expirado',refunded:'Reembolsado'};
 var payAction={approved:'Marcar como pago',rejected:'Recusado',expired:'Expirado',pending:'Voltar p/ pendente',refunded:'Reembolsado'};
 var categories=['Lanches','Dogs','Torradas','Fritas','Pastéis e salgados','Almoço à la minuta','Bebidas frias','Bebidas quentes'];
 var weekdays=['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
@@ -496,7 +497,9 @@ function typeBanner(s){var t=tableOf(s);return '<div class="otype t-'+(s.mode===
 function ticketHTML(o){
   var s=o.snapshot,del=s.mode==='delivery',t=tableOf(s);
   function r(a,b,cls){return '<div class="r'+(cls?' '+cls:'')+'"><span>'+a+'</span><span>'+b+'</span></div>'}
-  var h=(lunchText(s)?'<div class="mode" style="font-size:30px;padding:3mm 1.5mm;border:4px solid #000">ALMOÇO – '+esc(lunchText(s).toUpperCase())+'</div>':'')+'<div class="mode" style="font-size:24px;padding:2.5mm 1.5mm">'+esc(modeName(s).toUpperCase())+(t?'<br>MESA '+esc(t.toUpperCase()):'')+'</div>'+
+  var h=(isWa(o)?'<div class="mode" style="font-size:26px;padding:3mm 1.5mm;border:4px solid #000">VIA WHATSAPP – CONFERIR</div>':'')+
+    (isPix(o)&&o.payment!=='approved'?'<div class="mode" style="font-size:26px;padding:3mm 1.5mm;border:4px solid #000">PIX – CONFERIR PAGAMENTO</div>':'')+
+    (lunchText(s)?'<div class="mode" style="font-size:30px;padding:3mm 1.5mm;border:4px solid #000">ALMOÇO – '+esc(lunchText(s).toUpperCase())+'</div>':'')+'<div class="mode" style="font-size:24px;padding:2.5mm 1.5mm">'+esc(modeName(s).toUpperCase())+(t?'<br>MESA '+esc(t.toUpperCase()):'')+'</div>'+
     '<div class="num">PEDIDO '+esc(o.number)+'</div><p class="c">'+fmtDate.format(new Date(o.created))+'</p>'+
     '<p class="big">'+esc(s.customer.name)+'</p><p>Tel.: '+esc(String(s.customer.phone||'').replace(/\D/g,'').replace(/^55(?=\d{10,11}$)/,'').replace(/^(\d{2})(\d{4,5})(\d{4})$/,'($1) $2-$3'))+'</p>'+
     (del?addrHTML(s,'big'):'')+'<hr>'+
@@ -524,7 +527,7 @@ function nextPrint(){
 /* imprime pedidos que chegaram depois de ligar a opção (e os que chegaram com o painel fechado, até 12 h) */
 function autoPrintNew(){
   loadPrinted();var since=Math.max(autoPrint.since,Date.now()-12*36e5);
-  var todo=orders.filter(function(o){return !printed[o.id]&&o.status!=='cancelled'&&!proofLocked(o)&&new Date(o.created)>=since}) // Pix: só imprime depois de confirmado.sort(function(a,b){return new Date(a.created)-new Date(b.created)});
+  var todo=orders.filter(function(o){return !printed[o.id]&&o.status!=='cancelled'&&new Date(o.created)>=since}).sort(function(a,b){return new Date(a.created)-new Date(b.created)});
   if(!todo.length)return;
   todo.forEach(function(o){printed[o.id]=Date.now()});savePrinted();
   todo.reduce(function(p,o){return p.then(function(){return api('orders/'+o.id).catch(function(){return o}).then(function(full){printTicket(ticketHTML(full))})})},Promise.resolve());
@@ -533,7 +536,7 @@ $('dFoot').addEventListener('click',function(e){if(e.target.closest('[data-print
 
 /* ===== pedidos ===== */
 function nextStages(o){var s=o.snapshot;return({received:['preparing','cancelled'],preparing:['ready','cancelled'],ready:s.mode==='delivery'?['out_for_delivery','cancelled']:['completed','cancelled'],out_for_delivery:['completed','cancelled'],completed:[],cancelled:[]})[o.status]}
-function nextPays(o){return({pending:['approved','rejected','expired'],review:['approved','rejected'],approved:['refunded'],rejected:['pending'],expired:['pending'],refunded:[]})[o.payment]}
+function nextPays(o){return({pending:['approved','rejected','expired'],review:['approved','rejected'],approved:['refunded'],rejected:['pending','approved'],expired:['pending'],refunded:[]})[o.payment]}
 function total(o){return o.snapshot.subtotal+(o.fee||0)}
 /* motivo do cancelamento: vai ao servidor (campo reason) e fica guardado neste aparelho para a mensagem do WhatsApp */
 function reasons(){try{return JSON.parse(localStorage.getItem('xleo-motivos')||'{}')||{}}catch(e){return {}}}
@@ -543,12 +546,15 @@ function payMethod(o){var m=/Pagamento:\s*(Pix|Cartão|Dinheiro)/i.exec(o.snapsh
 var stageFilters=[['active','Em andamento',function(o){return ['received','preparing','ready','out_for_delivery'].indexOf(o.status)>-1}],['received','Novos',function(o){return o.status==='received'}],['preparing','Em preparo',function(o){return o.status==='preparing'}],['ready','Prontos',function(o){return o.status==='ready'||o.status==='out_for_delivery'}],['completed','Concluídos',function(o){return o.status==='completed'}],['cancelled','Cancelados',function(o){return o.status==='cancelled'}],['all','Todos',function(){return true}]];
 
 /* Pix com comprovante esperando o Léo conferir: aparece no topo, de qualquer dia */
-function needsPixCheck(o){return !!o.proof&&o.payment==='review'&&o.status!=='cancelled'}
-function proofLocked(o){return !!o.proof&&o.payment!=='approved'}
+function needsPixCheck(o){return o.payment==='review'&&o.status!=='cancelled'}
+function proofLocked(o){return false} // Pix não trava mais o preparo nem a impressão (fica "Pix a conferir")
+function isWa(o){return o.origin==='whatsapp'}
+function isPix(o){return o.payMethod==='pix'||!!o.proof}
+function waPill(o){return isWa(o)?'<span class="pill p-wa">WhatsApp</span>':''}
 function renderPixQueue(){
   var q=orders.filter(needsPixCheck).sort(function(a,b){return new Date(a.created)-new Date(b.created)});
-  $('pixQueue').innerHTML=q.length?'<section class="pixq" aria-live="polite"><h2>'+(q.length===1?'1 Pix aguardando confirmação':q.length+' Pix aguardando confirmação')+'</h2>'+
-    q.map(function(o){return '<div class="row"><b>'+esc(o.number)+'</b><span>'+esc(o.snapshot.customer.name)+' · '+money(total(o))+' · '+ago(o.created)+'</span><button class="btn btn-sm btn-primary" data-open="'+o.id+'">Conferir</button></div>'}).join('')+'</section>':'';
+  $('pixQueue').innerHTML=q.length?'<section class="pixq" aria-live="polite"><h2>'+(q.length===1?'1 Pix a conferir':q.length+' Pix a conferir')+'</h2><p class="muted" style="font-size:13.5px">Confira no app do banco e clique em Pagamento confirmado.</p>'+
+    q.map(function(o){return '<div class="row"><b>'+esc(o.number)+'</b><span>'+esc(o.snapshot.customer.name)+' · '+money(total(o))+' · '+stageNames[o.status]+' · '+ago(o.created)+(isWa(o)?' · WhatsApp':'')+'</span><button class="btn btn-sm btn-primary" data-open="'+o.id+'">Conferir</button></div>'}).join('')+'</section>':'';
 }
 $('pixQueue').addEventListener('click',function(e){var b=e.target.closest('[data-open]');if(b)openOrder(b.dataset.open)});
 function renderOrders(){
@@ -571,9 +577,9 @@ function renderOrders(){
 function cardHTML(o){
   var s=o.snapshot, nx=nextStages(o).filter(function(n){return n!=='cancelled'})[0], blocked=proofLocked(o);
   var items=s.lines.map(function(l){return l.qty+'× '+esc(l.name)}).join(' · ');
-  return '<article class="ocard" data-s="'+o.status+'" data-pay="'+o.payment+'">'+typeBanner(s)+lunchTag(s)+(needsPixCheck(o)?'<div class="hint">Pix com comprovante: confira e confirme para liberar o preparo</div>':'')+
+  return '<article class="ocard" data-s="'+o.status+'" data-pay="'+o.payment+'">'+typeBanner(s)+lunchTag(s)+(needsPixCheck(o)?'<div class="hint">Pix a conferir: confira no banco e clique em Pagamento confirmado</div>':'')+
     '<div class="head"><h3>'+esc(o.number)+'</h3><span class="when">'+ago(o.created)+'</span></div>'+
-    '<div class="pills"><span class="pill p-'+o.status+'">'+stageNames[o.status]+'</span><span class="pill p-'+o.payment+'">'+payNames[o.payment]+'</span></div>'+
+    '<div class="pills"><span class="pill p-'+o.status+'">'+stageNames[o.status]+'</span><span class="pill p-'+o.payment+'">'+payNames[o.payment]+'</span>'+waPill(o)+'</div>'+
     '<div><div class="who">'+esc(s.customer.name)+'</div>'+(s.mode==='delivery'?'<div class="muted" style="font-size:13.5px">'+(s.addr&&s.addr.street?esc(s.addr.street)+', <b style="color:var(--carvao,inherit)">'+esc(s.addr.number)+'</b> - ':'')+esc(s.neighborhood)+'</div>':'')+'</div>'+
     '<div class="items">'+items+'</div>'+
     (s.mode==='delivery'&&o.fee===null&&['completed','cancelled'].indexOf(o.status)<0?'<div class="hint">Frete a combinar: anote o valor no pedido</div>':'')+
@@ -631,7 +637,7 @@ function waText(o){
 }
 function drawOrder(keepOpen){
   var o=cur.o,s=o.snapshot;
-  var body=typeBanner(s)+lunchTag(s)+'<div class="pills"><span class="pill p-'+o.status+'">'+stageNames[o.status]+'</span><span class="pill p-'+o.payment+'">'+payNames[o.payment]+'</span></div>'+'<!--proof-->'+
+  var body=typeBanner(s)+lunchTag(s)+'<div class="pills"><span class="pill p-'+o.status+'">'+stageNames[o.status]+'</span><span class="pill p-'+o.payment+'">'+payNames[o.payment]+'</span>'+waPill(o)+'</div>'+'<!--proof-->'+
     (o.status==='cancelled'&&reasonOf(o)?'<p class="note">Motivo do cancelamento: '+esc(reasonOf(o))+'</p>':'')+
     '<div class="box"><h3>Cliente</h3><p><b>'+esc(s.customer.name)+'</b> · <span class="num">'+esc(s.customer.phone)+'</span></p>'+(s.mode==='delivery'?addrHTML(s):s.mode==='dine_in'?'<p class="muted">Come no restaurante'+(tableOf(s)?' · mesa '+esc(tableOf(s)):'')+'</p>':'<p class="muted">Retira no balcão (para levar)</p>')+'<p class="muted" style="font-size:13px">Feito em '+fmtDate.format(new Date(o.created))+'</p></div>'+
     '<div class="box"><h3>Itens</h3><div class="lines">'+s.lines.map(function(l){return '<div class="line"><b>'+l.qty+'× '+esc(l.name)+'</b><span class="num">'+money(l.total)+'</span>'+(l.extras&&l.extras.length?'<small>+ '+l.extras.map(function(x){return esc(x.name)}).join(', ')+'</small>':'')+(l.note?'<small>Obs.: '+esc(l.note)+'</small>':'')+'</div>'}).join('')+'</div>'+(s.notes?'<p class="note" style="margin-top:6px">Obs. do pedido: '+esc(s.notes)+'</p>':'')+'</div>'+
@@ -644,8 +650,8 @@ function drawOrder(keepOpen){
     body=body.split('<!--proof-->').join('<div class="box" id="proofBox"><h3>Comprovante do Pix</h3>'+
       (o.proof.type==='application/pdf'?'<a class="btn" href="'+purl+'" target="_blank" rel="noopener">Abrir PDF do comprovante ↗</a>':'<img class="proofimg" src="'+purl+'" alt="Comprovante do Pix do pedido '+esc(o.number)+'" data-zoom>')+
       '<p class="muted" style="font-size:13px">Enviado em '+fmtDate.format(new Date(o.proof.sent))+' · valor do pedido: <b>'+money(total(o))+'</b>'+(o.proof.type==='application/pdf'?'':' · toque na imagem para ampliar')+'</p>'+
-      (o.payment==='review'?'<p class="note">Confira no app do banco se o valor caiu antes de confirmar.</p><div class="btnrow"><button class="btn btn-primary" data-act="payment" data-v="approved">Confirmar pagamento</button><button class="btn btn-danger" data-act="rejectpix">Recusar</button></div>':
-       o.payment==='rejected'?'<p class="note">Pagamento recusado'+(o.payReason?': '+esc(o.payReason):'')+'</p>':
+      (o.payment==='review'?'<p class="note">Pix a conferir: o pedido já foi liberado. Confira no app do banco se o valor caiu.</p><div class="btnrow"><button class="btn btn-primary" data-act="payment" data-v="approved">Pagamento confirmado</button><button class="btn btn-danger" data-act="rejectpix">Pix não caiu</button></div>':
+       o.payment==='rejected'?'<p class="note">Pix não caiu'+(o.payReason?': '+esc(o.payReason):'')+'</p><div class="btnrow"><button class="btn btn-sm" data-act="payment" data-v="approved">O Pix caiu: marcar como pago</button></div>':
        o.payment==='approved'?'<p class="pill p-approved" style="justify-self:start">Pago</p>':'')+'</div>')}
   body+='<div class="box"><h3>Andamento</h3>'+(proofLocked(o)&&o.status==='received'?'<p class="muted" style="font-size:13px">O preparo libera depois que o Pix for confirmado.</p>':'')+'<div class="btnrow">'+(nx.length?nx.map(function(n){return '<button class="btn '+(n==='cancelled'?'btn-danger':'btn-primary')+'" data-act="status" data-v="'+n+'" '+(proofLocked(o)&&n!=='cancelled'?'disabled':'')+'>'+stageAction[n]+'</button>'}).join(''):'<span class="muted">Pedido encerrado.</span>')+'</div></div>'+
     (o.payment==='review'?'':'<div class="box"><h3>Pagamento</h3><p class="muted" style="font-size:13px">Registro manual: marque quando receber no balcão ou na entrega.</p><div class="btnrow">'+(np.length?np.map(function(n){return '<button class="btn btn-sm" data-act="payment" data-v="'+n+'" '+(o.fee===null&&s.mode==='delivery'||(o.status==='cancelled'&&n==='approved')?'disabled':'')+'>'+payAction[n]+'</button>'}).join(''):'<span class="muted">Sem ações.</span>')+'</div></div>')+
@@ -668,16 +674,16 @@ $('dBody').addEventListener('click',async function(e){
       b.closest('.box').after(box);b.disabled=true;$('cancelReason').focus();return}
     if(act==='rejectpix'){if($('rejectBox'))return;
       var rb=document.createElement('div');rb.className='box';rb.id='rejectBox';
-      rb.innerHTML='<h3>Recusar pagamento</h3><label class="field">Motivo <small class="muted">(opcional, aparece para o cliente)</small><input type="text" id="rejReason" maxlength="140" list="rejList" placeholder="Ex.: valor não caiu na conta"></label>'+
+      rb.innerHTML='<h3>Pix não caiu</h3><label class="field">Motivo <small class="muted">(opcional, aparece para o cliente)</small><input type="text" id="rejReason" maxlength="140" list="rejList" placeholder="Ex.: valor não caiu na conta"></label>'+
         '<datalist id="rejList"><option value="O valor não caiu na conta"><option value="Valor diferente do pedido"><option value="Comprovante ilegível"><option value="Comprovante de outro pedido"></datalist>'+
-        '<div class="btnrow"><button class="btn btn-danger" data-act="payment" data-v="rejected" data-sure="1">Confirmar recusa</button><button class="btn" type="button" data-act="keep">Voltar</button></div>';
+        (['completed','cancelled'].indexOf(cur.o.status)<0?'<label class="field" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="rejCancel"> Cancelar o pedido também</label>':'')+'<div class="btnrow"><button class="btn btn-danger" data-act="payment" data-v="rejected" data-sure="1">Marcar Pix não caiu</button><button class="btn" type="button" data-act="keep">Voltar</button></div>';
       $('proofBox').after(rb);$('rejReason').focus();return}
     if(act==='keep'){var cb=$('cancelBox');if(cb)cb.remove();drawOrder(true);return}
-    var extra=null,fromReview=cur.o.payment==='review';if(act==='payment'&&val==='rejected'&&$('rejReason')){var rr=$('rejReason').value.trim();if(rr)extra={reason:rr}}
+    var extra=null,fromReview=cur.o.payment==='review';if(act==='payment'&&val==='rejected'&&$('rejReason')){var rr=$('rejReason').value.trim();extra={};if(rr)extra.reason=rr;if($('rejCancel')&&$('rejCancel').checked)extra.cancel=true}
     if(act==='status'&&val==='cancelled'){var rs=($('cancelReason')||{}).value;rs=String(rs||'').trim();if(rs){extra={reason:rs};saveReason(cur.id,rs)}}
     if(act==='fee'){var v=$('feeIn').value.trim();if(!v){$('oErr').textContent='Informe o valor do frete.';return}val=Math.round(Number(v.replace(',','.'))*100);if(!(val>=0)){$('oErr').textContent='Valor inválido.';return}}
     $('dBody').querySelectorAll('button').forEach(function(x){x.disabled=true});
-    try{var upd=await patchOrder(cur.o,act,val,extra);cur={kind:'order',id:upd.id,version:upd.version,o:upd};drawOrder(true);toast(act==='status'?(val==='cancelled'?'Pedido cancelado. Avise o cliente pelo botão do WhatsApp.':stageNames[val]):act==='payment'?(fromReview&&val==='approved'?'Pagamento confirmado. '+(upd.status==='preparing'?'Pedido em preparo.':''):payNames[val]):'Frete salvo')}
+    try{var upd=await patchOrder(cur.o,act,val,extra);cur={kind:'order',id:upd.id,version:upd.version,o:upd};drawOrder(true);toast(act==='status'?(val==='cancelled'?'Pedido cancelado. Avise o cliente pelo botão do WhatsApp.':stageNames[val]):act==='payment'?(val==='approved'?'Pagamento confirmado.':val==='rejected'?(upd.status==='cancelled'?'Pix não caiu: pedido cancelado. Avise o cliente pelo WhatsApp.':'Marcado: Pix não caiu.'):payNames[val]):'Frete salvo')}
     catch(err){var m=err.message;await openOrder(cur.id,true);$('oErr').textContent=m}
   }
 });
