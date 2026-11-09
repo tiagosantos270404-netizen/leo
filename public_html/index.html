@@ -602,7 +602,7 @@ function modesHTML(){
 function sumHTML(){
   var h='<div class="sum"><div><span>Subtotal</span><span>'+money(subtotal())+'</span></div>';
   var fee=form.mode==='entrega'?knownFee(form.bairro):0;
-  if(form.mode==='entrega')h+=fee!=null?'<div><span>Taxa de entrega</span><span>'+money(fee)+'</span></div>':'<div class="muted"><span>Taxa de entrega</span><span>'+(form.bairro.trim()?'o restaurante informa':'escolha o bairro')+'</span></div>';
+  if(form.mode==='entrega')h+=fee!=null?'<div><span>Taxa de entrega</span><span>'+money(fee)+'</span></div>':'<div class="muted"><span>Taxa de entrega</span><span>'+(form.bairro.trim()?'a combinar':'escolha o bairro')+'</span></div>';
   return h+'<div class="tot"><span>Total</span><span>'+money(subtotal()+(fee||0))+(form.mode==='entrega'&&fee==null?' + taxa':'')+'</span></div></div>';
 }
 function addressHTML(){
@@ -654,8 +654,8 @@ function bairroHTML(){
     '<select class="inp" id="fBairroSel"><option value="">Escolha o bairro…</option>'+live.areas.map(function(a){var f=knownFee(a);return '<option value="'+esc(a)+'"'+(a===match?' selected':'')+'>'+esc(a)+(f!=null?' — frete '+money(f):'')+'</option>'}).join('')+
     (live.restrict?'':'<option value="__outro"'+(outro?' selected':'')+'>Outro bairro</option>')+'</select>'+
     (outro?'<input id="fBairro" type="text" placeholder="Digite o nome do bairro" value="'+esc(form.bairro)+'" aria-label="Nome do bairro">':'')+
-    (match?'<span class="hint">'+(fee!=null?'Frete para '+esc(match)+': <b style="color:var(--carvao)">'+money(fee)+'</b>':'O restaurante informa o frete para este bairro.')+'</span>':
-      outro?'<span class="hint">Para outros bairros, o Léo informa o frete e você aceita antes do preparo.</span>':
+    (match?'<span class="hint">'+(fee!=null?'Frete para '+esc(match)+': <b style="color:var(--carvao)">'+money(fee)+'</b>':'Frete a combinar para este bairro: pago na entrega.')+'</span>':
+      outro?'<span class="hint">Para outros bairros, o frete é a combinar: o Léo informa o valor e você paga na entrega.</span>':
       live.restrict?'<span class="hint">Seu bairro não está na lista? Fale com a gente no WhatsApp.</span>':'')+
     '<span class="err" id="eBairro" hidden>Informe o bairro</span></div>';
 }
@@ -828,7 +828,7 @@ function orderInput(){return {pay:{Pix:'pix','Cartão':'card',Dinheiro:'cash'}[f
 async function getQuote(){
   quote=null;var input=orderInput();
   try{var q=await apiCall('quote',input);quote={input:input,q:q};
-    $('quoteBox').innerHTML='<div class="sum"><div><span>Produtos</span><span>'+money(q.subtotal)+'</span></div>'+(input.mode==='delivery'?'<div class="muted"><span>Entrega</span><span>'+(q.fee==null?'o restaurante informa':money(q.fee))+'</span></div>':'')+'<div class="tot"><span>Total</span><span>'+(q.fee==null&&input.mode==='delivery'?money(q.subtotal)+' + entrega':money(q.total!=null?q.total:q.subtotal))+'</span></div></div>'+(q.fee==null&&input.mode==='delivery'?'<p class="paused" style="margin-top:8px">O restaurante vai informar a taxa de entrega. Você aceita o valor no acompanhamento antes do preparo.</p>':'');
+    $('quoteBox').innerHTML='<div class="sum"><div><span>Produtos</span><span>'+money(q.subtotal)+'</span></div>'+(input.mode==='delivery'?'<div class="muted"><span>Entrega</span><span>'+(q.fee==null?'a combinar':money(q.fee))+'</span></div>':'')+'<div class="tot"><span>Total</span><span>'+(q.fee==null&&input.mode==='delivery'?money(q.subtotal)+' + entrega':money(q.total!=null?q.total:q.subtotal))+'</span></div></div>'+(q.fee==null&&input.mode==='delivery'?'<p class="paused" style="margin-top:8px">Frete a combinar: o Léo informa o valor e você paga o frete na entrega.</p>':'');
     if(proofFlow())renderPixBox(q.total);updSend();
   }catch(err){$('quoteBox').innerHTML='';$('sendErr').textContent=err.message}
 }

@@ -355,7 +355,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--brasa);outline:none}
       </div>
       <div class="card" style="grid-column:1/-1">
         <h2>Entrega por bairro</h2>
-        <div class="setrow"><span><b>Só entregar nos bairros cadastrados</b><small>Frete vazio = valor combinado no pedido (o cliente aceita antes do preparo).</small></span><label class="switch"><input type="checkbox" id="s-restrictDelivery"><span class="track"></span></label></div>
+        <div class="setrow"><span><b>Só entregar nos bairros cadastrados</b><small>Frete vazio = frete a combinar (o cliente paga na entrega).</small></span><label class="switch"><input type="checkbox" id="s-restrictDelivery"><span class="track"></span></label></div>
         <div id="areasList" style="display:grid;gap:10px"></div>
         <button type="button" class="btn btn-sm" id="addArea">+ Adicionar bairro</button>
       </div>
@@ -569,14 +569,14 @@ function renderOrders(){
   var nNew=orders.filter(function(o){return o.status==='received'}).length;$('newCount').hidden=!nNew;$('newCount').textContent=nNew;
 }
 function cardHTML(o){
-  var s=o.snapshot, nx=nextStages(o).filter(function(n){return n!=='cancelled'})[0], blocked=!o.fee_approved||proofLocked(o);
+  var s=o.snapshot, nx=nextStages(o).filter(function(n){return n!=='cancelled'})[0], blocked=proofLocked(o);
   var items=s.lines.map(function(l){return l.qty+'× '+esc(l.name)}).join(' · ');
   return '<article class="ocard" data-s="'+o.status+'" data-pay="'+o.payment+'">'+typeBanner(s)+lunchTag(s)+(needsPixCheck(o)?'<div class="hint">Pix com comprovante: confira e confirme para liberar o preparo</div>':'')+
     '<div class="head"><h3>'+esc(o.number)+'</h3><span class="when">'+ago(o.created)+'</span></div>'+
     '<div class="pills"><span class="pill p-'+o.status+'">'+stageNames[o.status]+'</span><span class="pill p-'+o.payment+'">'+payNames[o.payment]+'</span></div>'+
     '<div><div class="who">'+esc(s.customer.name)+'</div>'+(s.mode==='delivery'?'<div class="muted" style="font-size:13.5px">'+(s.addr&&s.addr.street?esc(s.addr.street)+', <b style="color:var(--carvao,inherit)">'+esc(s.addr.number)+'</b> - ':'')+esc(s.neighborhood)+'</div>':'')+'</div>'+
     '<div class="items">'+items+'</div>'+
-    (blocked&&s.mode==='delivery'&&o.status==='received'?'<div class="hint">'+(o.fee===null?'Defina o frete para liberar o preparo':'Aguardando o cliente aceitar o frete')+'</div>':'')+
+    (s.mode==='delivery'&&o.fee===null&&['completed','cancelled'].indexOf(o.status)<0?'<div class="hint">Frete a combinar: anote o valor no pedido</div>':'')+
     '<div class="foot"><span class="tot">'+(o.fee===null&&s.mode==='delivery'?money(s.subtotal)+' + frete':money(total(o)))+'</span></div>'+
     '<div class="actions"><button class="btn btn-sm" data-open="'+o.id+'">Detalhes</button>'+
     (nx?'<button class="btn btn-sm btn-primary" data-quick="'+o.id+'" data-to="'+nx+'" '+(blocked?'disabled':'')+'>'+stageAction[nx]+'</button>':'')+'</div></article>';
@@ -621,7 +621,7 @@ async function openOrder(id,quiet){
 function waText(o){
   var s=o.snapshot,n=String(s.customer.name||'').trim().split(/\s+/)[0],num=o.number,del=s.mode==='delivery';
   var msg={
-    received:'Recebemos seu pedido '+num+' aqui no Léo! Já já começamos o preparo.'+(del&&o.fee!=null&&!o.fee_approved?' A taxa de entrega é '+money(o.fee)+'; é só aceitar na página do pedido.':''),
+    received:'Recebemos seu pedido '+num+' aqui no Léo! Já já começamos o preparo.',
     preparing:'Seu pedido '+num+' já está na chapa! 🍔',
     ready:del?'Seu pedido '+num+' está pronto e já vai sair para entrega.':s.mode==='dine_in'?'Seu pedido '+num+' está pronto! Já vamos servir'+(tableOf(s)?' na mesa '+tableOf(s):'')+'. 😋':'Seu pedido '+num+' está pronto! Pode vir buscar na Av. Visconde do Rio Grande, 1451. 😋',
     out_for_delivery:'Seu pedido '+num+' saiu para entrega! 🛵 Total: '+money(total(o))+'.',
@@ -636,8 +636,8 @@ function drawOrder(keepOpen){
     '<div class="box"><h3>Cliente</h3><p><b>'+esc(s.customer.name)+'</b> · <span class="num">'+esc(s.customer.phone)+'</span></p>'+(s.mode==='delivery'?addrHTML(s):s.mode==='dine_in'?'<p class="muted">Come no restaurante'+(tableOf(s)?' · mesa '+esc(tableOf(s)):'')+'</p>':'<p class="muted">Retira no balcão (para levar)</p>')+'<p class="muted" style="font-size:13px">Feito em '+fmtDate.format(new Date(o.created))+'</p></div>'+
     '<div class="box"><h3>Itens</h3><div class="lines">'+s.lines.map(function(l){return '<div class="line"><b>'+l.qty+'× '+esc(l.name)+'</b><span class="num">'+money(l.total)+'</span>'+(l.extras&&l.extras.length?'<small>+ '+l.extras.map(function(x){return esc(x.name)}).join(', ')+'</small>':'')+(l.note?'<small>Obs.: '+esc(l.note)+'</small>':'')+'</div>'}).join('')+'</div>'+(s.notes?'<p class="note" style="margin-top:6px">Obs. do pedido: '+esc(s.notes)+'</p>':'')+'</div>'+
     '<div class="box totals"><div><span>Produtos</span><span>'+money(s.subtotal)+'</span></div><div><span>Entrega</span><span>'+(s.mode!=='delivery'?'—':money(o.fee))+'</span></div><div class="big"><span>Total</span><span>'+(o.fee===null&&s.mode==='delivery'?'a definir':money(total(o)))+'</span></div></div>';
-  if(s.mode==='delivery'&&!o.fee_approved)body+='<p class="note">'+(o.fee===null?'Informe o frete abaixo. O cliente aceita o valor no acompanhamento e só então o preparo é liberado.':'Frete de '+money(o.fee)+' enviado. Aguardando o cliente aceitar.')+'</p>';
-  if(s.mode==='delivery'&&o.status==='received'&&o.payment==='pending')body+='<div class="box"><h3>Frete</h3><div style="display:flex;gap:8px"><div class="price-in" style="flex:1"><span>R$</span><input type="number" id="feeIn" min="0" max="10000" step="0.50" inputmode="decimal" value="'+(o.fee==null?'':(o.fee/100).toFixed(2))+'"></div><button class="btn" data-act="fee">Enviar frete</button></div></div>';
+  if(s.mode==='delivery'&&o.fee===null&&['completed','cancelled'].indexOf(o.status)<0)body+='<p class="note">Frete a combinar (bairro sem frete cadastrado). O cliente paga o frete na entrega. Anote o valor abaixo quando souber.</p>';
+  if(s.mode==='delivery'&&o.fee===null&&['completed','cancelled'].indexOf(o.status)<0&&o.payment!=='approved')body+='<div class="box"><h3>Frete</h3><div style="display:flex;gap:8px"><div class="price-in" style="flex:1"><span>R$</span><input type="number" id="feeIn" min="0" max="10000" step="0.50" inputmode="decimal" value="'+(o.fee==null?'':(o.fee/100).toFixed(2))+'"></div><button class="btn" data-act="fee">Salvar frete</button></div></div>';
   var nx=nextStages(o),np=nextPays(o);
   if(o.proof){var purl='/api/orders/'+encodeURIComponent(o.id)+'/proof';
     /* comprovante logo abaixo do status, no topo do pedido */
@@ -647,8 +647,8 @@ function drawOrder(keepOpen){
       (o.payment==='review'?'<p class="note">Confira no app do banco se o valor caiu antes de confirmar.</p><div class="btnrow"><button class="btn btn-primary" data-act="payment" data-v="approved">Confirmar pagamento</button><button class="btn btn-danger" data-act="rejectpix">Recusar</button></div>':
        o.payment==='rejected'?'<p class="note">Pagamento recusado'+(o.payReason?': '+esc(o.payReason):'')+'</p>':
        o.payment==='approved'?'<p class="pill p-approved" style="justify-self:start">Pago</p>':'')+'</div>')}
-  body+='<div class="box"><h3>Andamento</h3>'+(proofLocked(o)&&o.status==='received'?'<p class="muted" style="font-size:13px">O preparo libera depois que o Pix for confirmado.</p>':'')+'<div class="btnrow">'+(nx.length?nx.map(function(n){return '<button class="btn '+(n==='cancelled'?'btn-danger':'btn-primary')+'" data-act="status" data-v="'+n+'" '+((!o.fee_approved||proofLocked(o))&&n!=='cancelled'?'disabled':'')+'>'+stageAction[n]+'</button>'}).join(''):'<span class="muted">Pedido encerrado.</span>')+'</div></div>'+
-    (o.payment==='review'?'':'<div class="box"><h3>Pagamento</h3><p class="muted" style="font-size:13px">Registro manual: marque quando receber no balcão ou na entrega.</p><div class="btnrow">'+(np.length?np.map(function(n){return '<button class="btn btn-sm" data-act="payment" data-v="'+n+'" '+(!o.fee_approved||o.fee===null&&s.mode==='delivery'||(o.status==='cancelled'&&n==='approved')?'disabled':'')+'>'+payAction[n]+'</button>'}).join(''):'<span class="muted">Sem ações.</span>')+'</div></div>')+
+  body+='<div class="box"><h3>Andamento</h3>'+(proofLocked(o)&&o.status==='received'?'<p class="muted" style="font-size:13px">O preparo libera depois que o Pix for confirmado.</p>':'')+'<div class="btnrow">'+(nx.length?nx.map(function(n){return '<button class="btn '+(n==='cancelled'?'btn-danger':'btn-primary')+'" data-act="status" data-v="'+n+'" '+(proofLocked(o)&&n!=='cancelled'?'disabled':'')+'>'+stageAction[n]+'</button>'}).join(''):'<span class="muted">Pedido encerrado.</span>')+'</div></div>'+
+    (o.payment==='review'?'':'<div class="box"><h3>Pagamento</h3><p class="muted" style="font-size:13px">Registro manual: marque quando receber no balcão ou na entrega.</p><div class="btnrow">'+(np.length?np.map(function(n){return '<button class="btn btn-sm" data-act="payment" data-v="'+n+'" '+(o.fee===null&&s.mode==='delivery'||(o.status==='cancelled'&&n==='approved')?'disabled':'')+'>'+payAction[n]+'</button>'}).join(''):'<span class="muted">Sem ações.</span>')+'</div></div>')+
     '<p class="err" id="oErr" role="alert"></p>';
   var foot='<button class="btn" data-print="1">Imprimir comanda</button>'+(s.customer.phone?'<a class="btn btn-primary" href="https://wa.me/55'+String(s.customer.phone).replace(/\D/g,'').replace(/^55(?=\d{10,11}$)/,'')+'?text='+encodeURIComponent(waText(o))+'" target="_blank" rel="noopener" title="Abre o WhatsApp com a mensagem pronta">Avisar no WhatsApp ↗</a>':'');
   if(keepOpen&&!$('drawer').hidden){$('dTitle').textContent='Pedido '+o.number;$('dBody').innerHTML=body;$('dFoot').innerHTML=foot}else openDrawer('Pedido '+o.number,body,foot);
@@ -677,7 +677,7 @@ $('dBody').addEventListener('click',async function(e){
     if(act==='status'&&val==='cancelled'){var rs=($('cancelReason')||{}).value;rs=String(rs||'').trim();if(rs){extra={reason:rs};saveReason(cur.id,rs)}}
     if(act==='fee'){var v=$('feeIn').value.trim();if(!v){$('oErr').textContent='Informe o valor do frete.';return}val=Math.round(Number(v.replace(',','.'))*100);if(!(val>=0)){$('oErr').textContent='Valor inválido.';return}}
     $('dBody').querySelectorAll('button').forEach(function(x){x.disabled=true});
-    try{var upd=await patchOrder(cur.o,act,val,extra);cur={kind:'order',id:upd.id,version:upd.version,o:upd};drawOrder(true);toast(act==='status'?(val==='cancelled'?'Pedido cancelado. Avise o cliente pelo botão do WhatsApp.':stageNames[val]):act==='payment'?(fromReview&&val==='approved'?'Pagamento confirmado. '+(upd.status==='preparing'?'Pedido em preparo.':''):payNames[val]):'Frete enviado ao cliente')}
+    try{var upd=await patchOrder(cur.o,act,val,extra);cur={kind:'order',id:upd.id,version:upd.version,o:upd};drawOrder(true);toast(act==='status'?(val==='cancelled'?'Pedido cancelado. Avise o cliente pelo botão do WhatsApp.':stageNames[val]):act==='payment'?(fromReview&&val==='approved'?'Pagamento confirmado. '+(upd.status==='preparing'?'Pedido em preparo.':''):payNames[val]):'Frete salvo')}
     catch(err){var m=err.message;await openOrder(cur.id,true);$('oErr').textContent=m}
   }
 });
@@ -946,7 +946,7 @@ async function demoApi(path,body,method){
     if(method==='PATCH'){if(body.version!==o.version)throw Error('Este pedido foi alterado em outro aparelho. Atualizamos os dados.');
       if(body.action==='status'){if(nextStages(o).indexOf(body.value)<0)throw Error('Mudança de andamento não permitida.');o.status=body.value}
       if(body.action==='payment'){if(nextPays(o).indexOf(body.value)<0)throw Error('Mudança de pagamento não permitida.');o.payment=body.value}
-      if(body.action==='fee'){o.fee=body.value;o.fee_approved=false;setTimeout(function(){o.fee_approved=true;o.version++},8000)}
+      if(body.action==='fee'){o.fee=body.value;o.fee_approved=true}
       o.version++}
     return clone(o)}
   throw Error('Rota não encontrada');

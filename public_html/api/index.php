@@ -32,7 +32,7 @@ function db(): PDO {
     $pdo = new PDO('mysql:host=' . ($d['host'] ?? '127.0.0.1') . ';dbname=' . $d['name'] . ';charset=utf8mb4', $d['user'], $d['pass'], [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, PDO::ATTR_EMULATE_PREPARES => false,
     ]);
-    migrate($pdo);
+    migrate($pdo); unlockFees($pdo);
     return $pdo;
 }
 function migrate(PDO $pdo): void {
@@ -49,6 +49,23 @@ function migrate(PDO $pdo): void {
         $st->execute([json_encode($seed, JSON_UNESCAPED_UNICODE)]);
     }
     @file_put_contents($flag, date('c'));
+}
+
+/* frete não precisa mais de aceite do cliente: uma única vez, libera os pedidos que ficaram esperando o aceite
+   (mantém o valor do frete; nenhum pedido é apagado) */
+function unlockFees(PDO $pdo): void {
+    $flag = __DIR__ . '/.migrated-fee-v1';
+    if (is_file($flag)) return;
+    $rows = $pdo->query('SELECT id FROM orders WHERE data LIKE \'%"fee_approved":false%\' OR data LIKE \'%"fee_approved": false%\'')->fetchAll();
+    foreach ($rows as $r) {
+        $pdo->beginTransaction();
+        $st = $pdo->prepare('SELECT data FROM orders WHERE id=? FOR UPDATE'); $st->execute([$r['id']]);
+        $o = json_decode((string) $st->fetchColumn(), true);
+        if (is_array($o) && empty($o['fee_approved'])) { $o['fee_approved'] = true; $o['version'] = (int) $o['version'] + 1;
+            $pdo->prepare('UPDATE orders SET data=?, version=? WHERE id=?')->execute([json_encode($o, JSON_UNESCAPED_UNICODE), $o['version'], $o['id']]); }
+        $pdo->commit();
+    }
+    @file_put_contents($flag, date('c') . ' ' . count($rows));
 }
 
 /* ---------- utilidades ---------- */
@@ -405,7 +422,7 @@ try {
         $mime = $needProof ? checkProof($_FILES['proof'] ?? null) : '';
         $id = bin2hex(random_bytes(12)); $ms = nowMs();
         $o = ['id' => $id, 'number' => '', 'created' => iso($ms), 'status' => 'received', 'payment' => $needProof ? 'review' : 'pending', 'fee' => $q['fee'],
-            'fee_approved' => $q['fee'] !== null, 'cancelReason' => '', 'payMethod' => $q['pay'], 'version' => 1,
+            'fee_approved' => true, 'cancelReason' => '', 'payMethod' => $q['pay'], 'version' => 1,
             'snapshot' => ['customer' => $q['customer'], 'mode' => $q['mode'], 'table' => $q['table'], 'address' => $q['address'], 'addr' => $q['addr'], 'neighborhood' => $q['neighborhood'], 'lunch' => $q['lunch'], 'notes' => $q['notes'], 'lines' => $q['lines'], 'subtotal' => $q['subtotal']]];
         $pdo = db(); $pdo->beginTransaction();
         $pdo->prepare('INSERT INTO orders (id, created_ts, idem, version, data) VALUES (?, ?, ?, 1, ?)')->execute([$id, $ms, $key, '{}']);
@@ -456,7 +473,6 @@ try {
                 $next = ['received' => ['preparing', 'cancelled'], 'preparing' => ['ready', 'cancelled'], 'ready' => $del ? ['out_for_delivery', 'cancelled'] : ['completed', 'cancelled'],
                     'out_for_delivery' => ['completed', 'cancelled'], 'completed' => [], 'cancelled' => []][$o['status']];
                 if (!in_array($val, $next, true)) { $pdo->rollBack(); fail(409, 'Mudança de andamento não permitida.'); }
-                if ($val !== 'cancelled' && !$o['fee_approved']) { $pdo->rollBack(); fail(409, 'O cliente ainda não aceitou a taxa de entrega.'); }
                 if ($val !== 'cancelled' && isset($o['proof']) && $o['payment'] !== 'approved') { $pdo->rollBack(); fail(409, 'Confirme o pagamento do Pix antes de iniciar o preparo.'); }
                 $o['status'] = $val; if ($val === 'cancelled') $o['cancelReason'] = str($b['reason'] ?? '', 140);
             } elseif ($act === 'payment') {
@@ -465,10 +481,10 @@ try {
                 $wasReview = $o['payment'] === 'review'; $o['payment'] = $val;
                 if ($val === 'rejected') $o['payReason'] = str($b['reason'] ?? '', 140);
                 // Pix confirmado pelo Léo: o pedido vai direto para o preparo
-                if ($wasReview && $val === 'approved' && $o['status'] === 'received' && $o['fee_approved']) $o['status'] = 'preparing';
+                if ($wasReview && $val === 'approved' && $o['status'] === 'received') $o['status'] = 'preparing';
             } elseif ($act === 'fee') {
-                if (!$del || $o['status'] !== 'received' || $o['payment'] !== 'pending') { $pdo->rollBack(); fail(409, 'Não dá para mudar o frete agora.'); }
-                $o['fee'] = cents($val, 100000); $o['fee_approved'] = false;
+                if (!$del || in_array($o['status'], ['completed', 'cancelled'], true) || $o['payment'] === 'approved') { $pdo->rollBack(); fail(409, 'Não dá para mudar o frete agora.'); }
+                $o['fee'] = cents($val, 100000); $o['fee_approved'] = true;
             } else { $pdo->rollBack(); fail(422, 'Ação desconhecida.'); }
             $o['version']++; saveOrder($o); $pdo->commit(); out($o);
         }

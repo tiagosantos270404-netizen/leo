@@ -105,7 +105,7 @@ main .inner{display:grid;gap:14px}
 'use strict';
 var $=function(id){return document.getElementById(id)};
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
-var BRL=new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'});function money(c){return c==null?'a confirmar':BRL.format(c/100)}
+var BRL=new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'});function money(c){return c==null?'a combinar':BRL.format(c/100)}
 var fmtTime=new Intl.DateTimeFormat('pt-BR',{timeZone:'America/Sao_Paulo',hour:'2-digit',minute:'2-digit'});
 var qs=new URLSearchParams(location.search),id=qs.get('id'),token=qs.get('t');
 var DEMO=false,order=null,demoOrder=null;
@@ -133,7 +133,7 @@ function render(){
   if(lt&&['completed','cancelled'].indexOf(o.status)<0){lw.hidden=false;lw.innerHTML='Teu almoço será <b>'+(s.mode==='delivery'?'entregue':s.mode==='dine_in'?'servido':'retirado')+'</b> '+(lt==='asap'?'o quanto antes, a partir das 11:30':'às <b>'+esc(lt)+'</b>')+'.'}else lw.hidden=true;
   // frete a aceitar
   var fc=$('feeCard');
-  if(s.mode==='delivery'&&o.status==='received'&&!o.fee_approved){fc.hidden=false;
+  if(false){fc.hidden=false; // frete não precisa mais de aceite do cliente
     fc.innerHTML=o.fee==null?'<h2>Taxa de entrega</h2><p class="note">O Léo vai informar a taxa de entrega em instantes. Esta página atualiza sozinha.</p>':
       '<h2>Confirme a taxa de entrega</h2><p>Entrega para <b>'+esc(s.neighborhood)+'</b>: <b class="num">'+money(o.fee)+'</b>.</p><p>Total do pedido: <b class="num">'+money(s.subtotal+o.fee)+'</b></p><button class="btn btn-primary" id="acceptFee">Aceitar e liberar o preparo</button><p class="err" id="feeErr" role="alert"></p>';
     var b=$('acceptFee');if(b)b.onclick=acceptFee;
@@ -173,7 +173,7 @@ function pixCode(cents,txid){
 }
 function renderPix(){
   var o=order,s=o.snapshot,c=$('pixCard');
-  var wantsPix=/Pagamento: Pix/.test(s.notes||''),known=s.mode!=='delivery'||(o.fee!=null&&o.fee_approved);
+  var wantsPix=/Pagamento: Pix/.test(s.notes||''),known=s.mode!=='delivery'||o.fee!=null;
   if(!wantsPix||o.payment!=='pending'||o.status==='cancelled'||!known){c.hidden=true;delete c.dataset.code;return}
   /* cliente escolheu Pix, mas o restaurante ainda não cadastrou a chave no painel */
   if(!pix||!pix.key){if(!pixLoaded){c.hidden=true;return}
