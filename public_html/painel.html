@@ -184,6 +184,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--brasa);outline:none}
 
 /* Gaveta */
 .overlay{position:fixed;inset:0;background:var(--overlay);z-index:50}
+/* escolher motoboy: caixa no meio (notebook) ou de baixo para cima (celular) */
+.pick-bg{position:fixed;inset:0;background:var(--overlay);z-index:90}
+.pick{position:fixed;z-index:91;left:50%;top:50%;transform:translate(-50%,-50%);width:min(420px,calc(100% - 32px));max-height:85vh;overflow:auto;background:var(--bg);border-radius:18px;padding:18px;display:grid;gap:10px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+.pick h2{font-size:20px}
+.pick .cbtn{display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:56px;width:100%;padding:10px 14px;border-radius:14px;border:1.5px solid var(--line);background:var(--surface);color:var(--carvao);font:600 16px var(--f-body);cursor:pointer;text-align:left}
+.pick .cbtn:hover,.pick .cbtn:focus-visible{border-color:var(--cor-primaria)}
+.pick .cbtn small{color:var(--muted);font-weight:500}
+@media (max-width:640px){.pick{top:auto;bottom:0;left:0;transform:none;width:100%;border-radius:18px 18px 0 0;padding-bottom:max(18px,env(safe-area-inset-bottom))}}
+.courier-line{font-size:14px;font-weight:700;color:var(--info)}
+.btn-moto.hot{background:#F7931E;color:#0D0D0D;border-color:#F7931E;font-size:15px;font-weight:800}
+.erow.moto{grid-template-columns:1.4fr 1.2fr auto auto}
 .drawer{position:fixed;z-index:60;right:0;top:0;bottom:0;width:min(520px,100%);background:var(--bg);display:flex;flex-direction:column;box-shadow:-10px 0 40px rgba(0,0,0,.25)}
 .dhead{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:calc(14px + env(safe-area-inset-top,0px)) 18px 14px;border-bottom:1px solid var(--line);background:var(--surface)}
 .dhead h2{font-size:22px;font-weight:700}
@@ -319,6 +330,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--brasa);outline:none}
       <div class="card"><h2>Mais vendidos</h2><div class="bars" id="topItems"></div></div>
       <div class="card"><h2>Por dia da semana</h2><div class="bars" id="byWeekday"></div></div>
       <div class="card"><h2>Horários de pico</h2><div class="bars" id="byHour"></div></div>
+      <div class="card"><h2>Entregas por motoboy</h2><label class="field" style="max-width:200px">Dia<input type="date" id="courierDay"></label><div class="bars" id="byCourier"></div><p class="muted" style="font-size:12.5px">Pedidos de entrega que saíram para entrega ou foram concluídos no dia. Se trocou de motoboy, conta para o último chamado.</p></div>
       <div class="card"><h2>Fechamento por pagamento</h2><div class="bars" id="byPay"></div><p class="muted" style="font-size:12.5px">Forma escolhida pelo cliente no pedido. "Pago" é o que você marcou como recebido.</p></div>
     </div>
     <p class="status-line">Calculado com os pedidos que o painel recebe do servidor. Pedidos cancelados não entram.</p>
@@ -360,6 +372,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--brasa);outline:none}
         <div id="areasList" style="display:grid;gap:10px"></div>
         <button type="button" class="btn btn-sm" id="addArea">+ Adicionar bairro</button>
       </div>
+      <div class="card" style="grid-column:1/-1">
+        <h2>Motoboys</h2>
+        <p class="muted" style="font-size:13.5px">Aparecem no botão "Chamar motoboy" dos pedidos de entrega. Desative quem não está trabalhando hoje.</p>
+        <div id="couriersList" style="display:grid;gap:10px"></div>
+        <button type="button" class="btn btn-sm" id="addCourier">+ Adicionar motoboy</button>
+      </div>
       <div style="grid-column:1/-1;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
         <button class="btn btn-primary" type="submit">Salvar funcionamento</button>
         <span class="err" id="hoursErr"></span>
@@ -385,6 +403,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--brasa);outline:none}
 <div class="savebar" id="savebar" hidden><div class="box"><p id="saveText">Alterações não salvas</p><button class="btn btn-ghost btn-sm" id="discard">Descartar</button><button class="btn btn-primary btn-sm" id="saveMenu">Salvar</button></div></div>
 
 <div class="overlay" id="overlay" hidden></div>
+<div class="pick-bg" id="pickBg" hidden></div>
+<div class="pick" id="courierPick" role="dialog" aria-modal="true" aria-labelledby="pickTitle" hidden></div>
 <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="dTitle" hidden>
   <div class="dhead"><h2 id="dTitle"></h2><button class="close" id="dClose" aria-label="Fechar">×</button></div>
   <div class="dbody" id="dBody"></div>
@@ -405,7 +425,7 @@ var fmtDate=new Intl.DateTimeFormat('pt-BR',{timeZone:'America/Sao_Paulo',dateSt
 function localDay(d){return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(d))}
 function ago(iso){var m=Math.round((Date.now()-new Date(iso))/60000);return m<1?'agora':m<60?'há '+m+' min':fmtTime.format(new Date(iso))}
 var stageNames={received:'Novo',preparing:'Em preparo',ready:'Pronto',out_for_delivery:'Saiu p/ entrega',completed:'Concluído',cancelled:'Cancelado'};
-var stageAction={preparing:'Iniciar preparo',ready:'Marcar pronto',out_for_delivery:'Saiu p/ entrega',completed:'Concluir',cancelled:'Cancelar'};
+var stageAction={preparing:'Iniciar preparo',ready:'Marcar pronto',out_for_delivery:'Saiu para entrega',completed:'Concluir',cancelled:'Cancelar'};
 var payNames={pending:'Pagamento pendente',review:'Pix a conferir',approved:'Pago',rejected:'Pagamento recusado',expired:'Expirado',refunded:'Reembolsado'};
 var payAction={approved:'Marcar como pago',rejected:'Recusado',expired:'Expirado',pending:'Voltar p/ pendente',refunded:'Reembolsado'};
 var categories=['Lanches','Dogs','Torradas','Fritas','Pastéis e salgados','Almoço à la minuta','Bebidas frias','Bebidas quentes'];
@@ -492,6 +512,47 @@ function addrHTML(s,cls){
   return '<p'+(cls?' class="'+cls+'"':'')+'>'+esc(a.street)+', <b class="addr-n">'+esc(a.number)+'</b>'+(a.complement?' - '+esc(a.complement):'')+' - '+esc(s.neighborhood)+'</p>'+
     (a.reference?'<p class="addr-ref">Ref.: '+esc(a.reference)+'</p>':'');
 }
+/* ===== motoboys ===== */
+function activeCouriers(){return (saved&&saved.couriers||[]).filter(function(c){return c.active})}
+function canCallCourier(o){return o.snapshot.mode==='delivery'&&['completed','cancelled'].indexOf(o.status)<0}
+function courierLine(o){return o.courier&&o.courier.name?'<div class="courier-line">🛵 Motoboy: '+esc(o.courier.name)+'</div>':''}
+function motoBtn(o,big){return canCallCourier(o)?'<button class="btn '+(big?'':'btn-sm ')+'btn-moto'+(o.status==='ready'?' hot':'')+'" data-moto="'+o.id+'">🛵 Chamar motoboy</button>':''}
+function trocoCents(s){var t=/troco para R\$\s*([\d.,]+)/i.exec(s.notes||'');if(!t)return null;var v=t[1].indexOf(',')>-1?t[1].replace(/\./g,'').replace(',','.'):t[1];v=Math.round(parseFloat(v)*100);return v>0?v:null}
+function courierPay(o){
+  var s=o.snapshot,m=payMethod(o),tot=total(o),semFrete=o.fee===null,val=semFrete?money(s.subtotal)+' + frete a combinar':money(tot);
+  if(m==='Pix')return val+' – '+(o.payment==='approved'?'Pix – já pago, não cobrar':'Pix – não cobrar (o Léo confere)');
+  if(m==='Cartão')return val+' – Cartão (levar a maquininha)';
+  if(m==='Dinheiro'){var t=trocoCents(s);return val+' – Dinheiro'+(t?', troco para '+money(t)+(!semFrete&&t>tot?' (levar '+money(t-tot)+')':''):' (sem troco)')}
+  return val+' – '+m}
+function courierMsg(o){
+  var s=o.snapshot,a=s.addr&&s.addr.street?s.addr:null,nb=s.neighborhood||'';
+  var line=a?a.street+', '+a.number+(a.complement?' - '+a.complement:''):String(s.address||'');
+  var q=(a?a.street+(a.number&&a.number!=='S/N'?', '+a.number:''):String(s.address||''))+(nb?' - '+nb:'')+', Barra do Ribeiro - RS';
+  var L=['🛵 Entrega – Pedido '+o.number,'Cliente: '+s.customer.name+' – '+s.customer.phone,'Endereço: '+line+(nb?' – '+nb:'')];
+  if(a&&a.reference)L.push('Referência: '+a.reference);
+  L.push('Mapa: https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(q));
+  L.push('Valor: '+courierPay(o));
+  if(lunchText(s))L.push('Horário do almoço: '+lunchText(s));
+  return L.join('\n')}
+var pickOrder=null;
+function openCourierPick(o){
+  pickOrder=o;var list=activeCouriers(),cid=o.courier&&o.courier.id;
+  $('courierPick').innerHTML='<h2 id="pickTitle">Chamar motoboy · '+esc(o.number)+'</h2>'+(o.courier?'<p class="muted" style="font-size:13.5px">Chamado agora: <b>'+esc(o.courier.name)+'</b>. Escolha outro para trocar.</p>':'')+
+    (list.length?list.map(function(c){return '<button class="cbtn" data-courier="'+esc(c.id)+'"><span>'+esc(c.name)+(c.id===cid?' <small>(chamado)</small>':'')+'</span><small>WhatsApp ↗</small></button>'}).join(''):
+      '<p class="note">Nenhum motoboy ativo. Cadastre em Funcionamento &gt; Motoboys.</p>')+
+    '<button class="btn" type="button" data-pickclose="1">Fechar</button><p class="err" id="pickErr" role="alert"></p>';
+  $('pickBg').hidden=false;$('courierPick').hidden=false;var f=$('courierPick').querySelector('.cbtn,.btn');if(f)f.focus()}
+function closeCourierPick(){$('pickBg').hidden=true;$('courierPick').hidden=true;pickOrder=null}
+$('pickBg').addEventListener('click',closeCourierPick);
+document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!$('courierPick').hidden){e.stopPropagation();closeCourierPick()}},true);
+$('courierPick').addEventListener('click',function(e){
+  if(e.target.closest('[data-pickclose]')){closeCourierPick();return}
+  var b=e.target.closest('[data-courier]');if(!b||!pickOrder)return;
+  var c=activeCouriers().find(function(x){return x.id===b.dataset.courier});if(!c)return;
+  var o=pickOrder;window.open('https://wa.me/55'+c.phone+'?text='+encodeURIComponent(courierMsg(o)),'_blank'); // abre já no toque (o celular bloqueia depois de esperar)
+  closeCourierPick();
+  patchOrder(o,'courier',c.id).then(function(upd){toast(o.number+': motoboy '+c.name);if(cur&&cur.kind==='order'&&cur.id===upd.id){cur={kind:'order',id:upd.id,version:upd.version,o:upd};drawOrder(true)}})
+    .catch(function(err){toast('O WhatsApp abriu, mas não salvou o motoboy: '+err.message)})});
 function tableOf(s){return s.mode==='dine_in'&&String(s.table||'').trim()?String(s.table).trim():''}
 function typeBanner(s){var t=tableOf(s);return '<div class="otype t-'+(s.mode==='delivery'||s.mode==='dine_in'?s.mode:'pickup')+'"><span>'+modeName(s)+'</span>'+(t?'<small>Mesa '+esc(t)+'</small>':'')+'</div>'}
 function ticketHTML(o){
@@ -502,7 +563,7 @@ function ticketHTML(o){
     (lunchText(s)?'<div class="mode" style="font-size:30px;padding:3mm 1.5mm;border:4px solid #000">ALMOÇO – '+esc(lunchText(s).toUpperCase())+'</div>':'')+'<div class="mode" style="font-size:24px;padding:2.5mm 1.5mm">'+esc(modeName(s).toUpperCase())+(t?'<br>MESA '+esc(t.toUpperCase()):'')+'</div>'+
     '<div class="num">PEDIDO '+esc(o.number)+'</div><p class="c">'+fmtDate.format(new Date(o.created))+'</p>'+
     '<p class="big">'+esc(s.customer.name)+'</p><p>Tel.: '+esc(String(s.customer.phone||'').replace(/\D/g,'').replace(/^55(?=\d{10,11}$)/,'').replace(/^(\d{2})(\d{4,5})(\d{4})$/,'($1) $2-$3'))+'</p>'+
-    (del?addrHTML(s,'big'):'')+'<hr>'+
+    (del?addrHTML(s,'big')+(o.courier&&o.courier.name?'<p>Motoboy: '+esc(o.courier.name)+'</p>':''):'')+'<hr>'+
     s.lines.map(function(l){return '<div class="it">'+r('<b>'+l.qty+'x '+esc(l.name)+'</b>',money(l.total))+
       (l.extras&&l.extras.length?l.extras.map(function(x){return '<div class="sub">+ '+esc(x.name)+'</div>'}).join(''):'')+
       (l.note?'<div class="obs">OBS: '+esc(l.note)+'</div>':'')+'</div>'}).join('')+
@@ -581,10 +642,10 @@ function cardHTML(o){
     '<div class="head"><h3>'+esc(o.number)+'</h3><span class="when">'+ago(o.created)+'</span></div>'+
     '<div class="pills"><span class="pill p-'+o.status+'">'+stageNames[o.status]+'</span><span class="pill p-'+o.payment+'">'+payNames[o.payment]+'</span>'+waPill(o)+'</div>'+
     '<div><div class="who">'+esc(s.customer.name)+'</div>'+(s.mode==='delivery'?'<div class="muted" style="font-size:13.5px">'+(s.addr&&s.addr.street?esc(s.addr.street)+', <b style="color:var(--carvao,inherit)">'+esc(s.addr.number)+'</b> - ':'')+esc(s.neighborhood)+'</div>':'')+'</div>'+
-    '<div class="items">'+items+'</div>'+
+    courierLine(o)+'<div class="items">'+items+'</div>'+
     (s.mode==='delivery'&&o.fee===null&&['completed','cancelled'].indexOf(o.status)<0?'<div class="hint">Frete a combinar: anote o valor no pedido</div>':'')+
     '<div class="foot"><span class="tot">'+(o.fee===null&&s.mode==='delivery'?money(s.subtotal)+' + frete':money(total(o)))+'</span></div>'+
-    '<div class="actions"><button class="btn btn-sm" data-open="'+o.id+'">Detalhes</button>'+
+    '<div class="actions"><button class="btn btn-sm" data-open="'+o.id+'">Detalhes</button>'+motoBtn(o)+
     (nx?'<button class="btn btn-sm btn-primary" data-quick="'+o.id+'" data-to="'+nx+'" '+(blocked?'disabled':'')+'>'+stageAction[nx]+'</button>':'')+'</div></article>';
 }
 $('stageChips').addEventListener('click',function(e){var c=e.target.closest('.chip');if(!c)return;stage=c.dataset.stage;renderOrders()});
@@ -592,6 +653,7 @@ $('day').addEventListener('change',renderOrders);
 $('orders').addEventListener('click',function(e){
   var b=e.target.closest('button');if(!b)return;
   if(b.dataset.open)openOrder(b.dataset.open);
+  if(b.dataset.moto){var mo=orders.find(function(x){return x.id===b.dataset.moto});if(mo)openCourierPick(mo);return}
   if(b.dataset.quick){var o=orders.find(function(x){return x.id===b.dataset.quick});b.disabled=true;patchOrder(o,'status',b.dataset.to).then(function(){toast(o.number+': '+stageNames[b.dataset.to])}).catch(function(err){toast(err.message);b.disabled=false})}
 });
 $('newAlertBtn').addEventListener('click',function(){stage='received';showTab('orders');renderOrders();$('newAlert').hidden=true});
@@ -639,7 +701,7 @@ function drawOrder(keepOpen){
   var o=cur.o,s=o.snapshot;
   var body=typeBanner(s)+lunchTag(s)+'<div class="pills"><span class="pill p-'+o.status+'">'+stageNames[o.status]+'</span><span class="pill p-'+o.payment+'">'+payNames[o.payment]+'</span>'+waPill(o)+'</div>'+'<!--proof-->'+
     (o.status==='cancelled'&&reasonOf(o)?'<p class="note">Motivo do cancelamento: '+esc(reasonOf(o))+'</p>':'')+
-    '<div class="box"><h3>Cliente</h3><p><b>'+esc(s.customer.name)+'</b> · <span class="num">'+esc(s.customer.phone)+'</span></p>'+(s.mode==='delivery'?addrHTML(s):s.mode==='dine_in'?'<p class="muted">Come no restaurante'+(tableOf(s)?' · mesa '+esc(tableOf(s)):'')+'</p>':'<p class="muted">Retira no balcão (para levar)</p>')+'<p class="muted" style="font-size:13px">Feito em '+fmtDate.format(new Date(o.created))+'</p></div>'+
+    '<div class="box"><h3>Cliente</h3><p><b>'+esc(s.customer.name)+'</b> · <span class="num">'+esc(s.customer.phone)+'</span></p>'+(s.mode==='delivery'?addrHTML(s)+courierLine(o)+(canCallCourier(o)?'<div class="btnrow" style="margin-top:8px">'+motoBtn(o,true)+'</div>':''):s.mode==='dine_in'?'<p class="muted">Come no restaurante'+(tableOf(s)?' · mesa '+esc(tableOf(s)):'')+'</p>':'<p class="muted">Retira no balcão (para levar)</p>')+'<p class="muted" style="font-size:13px">Feito em '+fmtDate.format(new Date(o.created))+'</p></div>'+
     '<div class="box"><h3>Itens</h3><div class="lines">'+s.lines.map(function(l){return '<div class="line"><b>'+l.qty+'× '+esc(l.name)+'</b><span class="num">'+money(l.total)+'</span>'+(l.extras&&l.extras.length?'<small>+ '+l.extras.map(function(x){return esc(x.name)}).join(', ')+'</small>':'')+(l.note?'<small>Obs.: '+esc(l.note)+'</small>':'')+'</div>'}).join('')+'</div>'+(s.notes?'<p class="note" style="margin-top:6px">Obs. do pedido: '+esc(s.notes)+'</p>':'')+'</div>'+
     '<div class="box totals"><div><span>Produtos</span><span>'+money(s.subtotal)+'</span></div><div><span>Entrega</span><span>'+(s.mode!=='delivery'?'—':money(o.fee))+'</span></div><div class="big"><span>Total</span><span>'+(o.fee===null&&s.mode==='delivery'?'a definir':money(total(o)))+'</span></div></div>';
   if(s.mode==='delivery'&&o.fee===null&&['completed','cancelled'].indexOf(o.status)<0)body+='<p class="note">Frete a combinar (bairro sem frete cadastrado). O cliente paga o frete na entrega. Anote o valor abaixo quando souber.</p>';
@@ -659,7 +721,7 @@ function drawOrder(keepOpen){
   var foot='<button class="btn" data-print="1">Imprimir comanda</button>'+(s.customer.phone?'<a class="btn btn-primary" href="https://wa.me/55'+String(s.customer.phone).replace(/\D/g,'').replace(/^55(?=\d{10,11}$)/,'')+'?text='+encodeURIComponent(waText(o))+'" target="_blank" rel="noopener" title="Abre o WhatsApp com a mensagem pronta">Avisar no WhatsApp ↗</a>':'');
   if(keepOpen&&!$('drawer').hidden){$('dTitle').textContent='Pedido '+o.number;$('dBody').innerHTML=body;$('dFoot').innerHTML=foot}else openDrawer('Pedido '+o.number,body,foot);
 }
-$('dBody').addEventListener('click',function(e){var im=e.target.closest('img[data-zoom]');if(!im)return;
+$('dBody').addEventListener('click',function(e){var mb=e.target.closest('[data-moto]');if(mb&&cur&&cur.kind==='order'){openCourierPick(cur.o);return}var im=e.target.closest('img[data-zoom]');if(!im)return;
   var z=document.createElement('div');z.className='zoom';z.setAttribute('role','dialog');z.setAttribute('aria-label','Comprovante ampliado (toque para fechar)');
   z.innerHTML='<img src="'+im.src+'" alt="'+esc(im.alt)+'">';z.addEventListener('click',function(){z.remove()});document.body.appendChild(z)});
 $('dBody').addEventListener('click',async function(e){
@@ -761,6 +823,13 @@ var salesPeriod='7',salesList=[];
 var fmtHour=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Sao_Paulo',hour:'2-digit',hourCycle:'h23'});
 function barsHTML(rows,fmt){var max=Math.max.apply(null,rows.map(function(r){return r[1]}).concat(1));
   return rows.length?rows.map(function(r){return '<div class="bar"><span>'+esc(r[0])+'</span><em>'+fmt(r)+'</em><i><b style="width:'+(r[1]?Math.max(3,Math.round(r[1]/max*100)):0)+'%"></b></i></div>'}).join(''):'<p class="muted" style="font-size:14px">Sem pedidos no período.</p>'}
+/* entregas por motoboy no dia (para o acerto) */
+function renderCourierSales(){
+  var inp=$('courierDay');if(!inp.value)inp.value=localDay(new Date());var day=inp.value,cnt={};
+  orders.forEach(function(o){if(o.snapshot.mode!=='delivery'||['out_for_delivery','completed'].indexOf(o.status)<0||localDay(o.created)!==day)return;
+    var k=o.courier&&o.courier.name?o.courier.name:'Sem motoboy';cnt[k]=(cnt[k]||0)+1});
+  $('byCourier').innerHTML=barsHTML(Object.keys(cnt).map(function(k){return [k,cnt[k]]}).sort(function(a,b){return b[1]-a[1]}),function(r){return r[1]+' entrega'+(r[1]===1?'':'s')})}
+$('courierDay').addEventListener('change',renderCourierSales);
 function renderSales(){
   var periods=[['1','Hoje'],['7','7 dias'],['30','30 dias'],['all','Tudo']];
   $('salesChips').innerHTML=periods.map(function(p){return '<button class="chip" data-period="'+p[0]+'" aria-pressed="'+(salesPeriod===p[0])+'">'+p[1]+'</button>'}).join('');
@@ -781,7 +850,7 @@ function renderSales(){
   $('byWeekday').innerHTML=list.length?barsHTML([1,2,3,4,5,6,0].map(function(d){return [weekdays[d],wd[d]]}),function(r){return r[1]+' pedido'+(r[1]===1?'':'s')}):barsHTML([]);
   var pays={};list.forEach(function(o){var k=payMethod(o);pays[k]=pays[k]||[k,0,0,0];pays[k][1]++;pays[k][2]+=total(o);if(o.payment==='approved')pays[k][3]+=total(o)});
   $('byPay').innerHTML=barsHTML(Object.keys(pays).map(function(k){return pays[k]}).sort(function(a,b){return b[2]-a[2]}).map(function(r){return [r[0],r[2],r[1],r[3]]}),function(r){return r[2]+' pedido'+(r[2]===1?'':'s')+' · '+money(r[1])+' · pago '+money(r[3])});
-  salesList=list;
+  salesList=list;renderCourierSales();
   $('byHour').innerHTML=barsHTML(Object.keys(hr).sort().map(function(h){return [h+'h às '+(('0'+((+h+1)%24)).slice(-2))+'h',hr[h]]}),function(r){return r[1]+' pedido'+(r[1]===1?'':'s')});
 }
 $('csvBtn').addEventListener('click',function(){
@@ -806,17 +875,18 @@ async function loadSched(){
 }
 var hoursDraft=null;
 function renderHours(){
-  hoursDraft=hoursDraft||{hours:clone(saved.hours||[]),deliveryRules:clone(saved.deliveryRules||[])};
+  hoursDraft=hoursDraft||{hours:clone(saved.hours||[]),deliveryRules:clone(saved.deliveryRules||[]),couriers:clone(saved.couriers||[])};
   ['acceptingOrders','pickupEnabled','deliveryEnabled','hoursConfirmed','restrictDelivery'].forEach(function(k){$('s-'+k).checked=!!saved[k]});
   var eta=saved.eta||{},px=saved.pix||{};$('eta-pickup').value=eta.pickup||'';$('eta-delivery').value=eta.delivery||'';
   $('pix-type').value=px.type||'phone';$('pix-key').value=px.type==='phone'?String(px.key||'').replace(/^\+55/,''):(px.key||'');$('pix-name').value=px.name||'';
   $('hoursList').innerHTML=hoursDraft.hours.map(function(h,i){return '<div class="erow" data-i="'+i+'"><label>Dia<select data-h="day">'+weekdays.map(function(d,j){return '<option value="'+j+'" '+(h.day===j?'selected':'')+'>'+d+'</option>'}).join('')+'</select></label><label>Abre<input type="time" data-h="open" value="'+esc(h.open)+'"></label><label>Fecha<input type="time" data-h="close" value="'+esc(h.close)+'"></label><button type="button" class="x" data-del="h" aria-label="Remover período">×</button></div>'}).join('')||'<p class="muted" style="font-size:13.5px">Nenhum horário cadastrado.</p>';
+  $('couriersList').innerHTML=hoursDraft.couriers.map(function(c,i){return '<div class="erow moto" data-i="'+i+'"><label>Nome<input type="text" maxlength="60" data-c="name" value="'+esc(c.name)+'"></label><label>WhatsApp<input type="tel" inputmode="tel" maxlength="20" data-c="phone" placeholder="(51) 9…" value="'+esc(c.phone?String(c.phone).replace(/^(\d{2})(\d{4,5})(\d{4})$/,'($1) $2-$3'):'')+'"></label><label class="switch" style="min-height:42px" title="Ativo"><input type="checkbox" data-c="active" '+(c.active?'checked':'')+'><span class="track"></span></label><button type="button" class="x" data-del="c" aria-label="Remover motoboy">×</button></div>'}).join('')||'<p class="muted" style="font-size:13.5px">Nenhum motoboy cadastrado.</p>';
   $('areasList').innerHTML=hoursDraft.deliveryRules.map(function(r,i){return '<div class="erow area" data-i="'+i+'"><label>Bairro<input type="text" maxlength="100" data-a="neighborhood" value="'+esc(r.neighborhood)+'"></label><label>Frete<span class="price-in"><span>R$</span><input type="number" min="0" max="10000" step="0.50" data-a="fee" placeholder="combinar" value="'+(r.fee==null?'':(r.fee/100).toFixed(2))+'"></span></label><label class="switch" style="min-height:42px" title="Atendido"><input type="checkbox" data-a="available" '+(r.available?'checked':'')+'><span class="track"></span></label><button type="button" class="x" data-del="a" aria-label="Remover bairro">×</button></div>'}).join('')||'<p class="muted" style="font-size:13.5px">Nenhum bairro cadastrado.</p>';
 }
 $('hoursList').addEventListener('change',function(e){var r=e.target.closest('.erow');if(!r)return;var h=hoursDraft.hours[+r.dataset.i],k=e.target.dataset.h;h[k]=k==='day'?Number(e.target.value):e.target.value});
 $('areasList').addEventListener('input',function(e){var r=e.target.closest('.erow');if(!r)return;var a=hoursDraft.deliveryRules[+r.dataset.i],k=e.target.dataset.a;if(k==='neighborhood')a.neighborhood=e.target.value;if(k==='fee')a.fee=e.target.value===''?null:Math.round(Number(e.target.value)*100);if(k==='available')a.available=e.target.checked});
 $('areasList').addEventListener('change',function(e){if(e.target.dataset.a==='available'){var r=e.target.closest('.erow');hoursDraft.deliveryRules[+r.dataset.i].available=e.target.checked}});
-document.getElementById('tab-hours').addEventListener('click',function(e){var b=e.target.closest('[data-del]');if(!b)return;var i=+b.closest('.erow').dataset.i;if(b.dataset.del==='h')hoursDraft.hours.splice(i,1);else hoursDraft.deliveryRules.splice(i,1);renderHoursKeep()});
+document.getElementById('tab-hours').addEventListener('click',function(e){var b=e.target.closest('[data-del]');if(!b)return;var i=+b.closest('.erow').dataset.i;if(b.dataset.del==='h')hoursDraft.hours.splice(i,1);else if(b.dataset.del==='c'){if(!confirm('Remover '+(hoursDraft.couriers[i].name||'este motoboy')+'? Os pedidos antigos continuam com o nome dele.'))return;hoursDraft.couriers.splice(i,1)}else hoursDraft.deliveryRules.splice(i,1);renderHoursKeep()});
 function renderHoursKeep(){var keep={},ids=['eta-pickup','eta-delivery','pix-type','pix-key','pix-name'],vals={};['acceptingOrders','pickupEnabled','deliveryEnabled','hoursConfirmed','restrictDelivery'].forEach(function(k){keep[k]=$('s-'+k).checked});ids.forEach(function(i){vals[i]=$(i).value});
   renderHours();Object.keys(keep).forEach(function(k){$('s-'+k).checked=keep[k]});ids.forEach(function(i){$(i).value=vals[i]})}
 /* chave Pix no formato do Banco Central */
@@ -827,20 +897,25 @@ function pixKey(type,v){v=String(v||'').trim();var d=v.replace(/\D/g,'');
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)?v.toLowerCase():null}
 $('addHour').addEventListener('click',function(){hoursDraft.hours.push({day:1,open:'11:00',close:'14:30'});renderHoursKeep()});
 $('addArea').addEventListener('click',function(){hoursDraft.deliveryRules.push({neighborhood:'',fee:null,available:true});renderHoursKeep()});
+$('addCourier').addEventListener('click',function(){hoursDraft.couriers.push({id:'',name:'',phone:'',active:true});renderHoursKeep();var r=$('couriersList').querySelectorAll('[data-c="name"]');if(r.length)r[r.length-1].focus()});
+$('couriersList').addEventListener('input',function(e){var r=e.target.closest('.erow');if(!r)return;var c=hoursDraft.couriers[+r.dataset.i],k=e.target.dataset.c;if(k==='name')c.name=e.target.value;if(k==='phone')c.phone=e.target.value});
+$('couriersList').addEventListener('change',function(e){if(e.target.dataset.c==='active'){var r=e.target.closest('.erow');hoursDraft.couriers[+r.dataset.i].active=e.target.checked}});
 $('hoursForm').addEventListener('submit',async function(e){
   e.preventDefault();$('hoursErr').textContent='';
   if(hoursDraft.hours.some(function(h){return !h.open||!h.close})){$('hoursErr').textContent='Preencha abertura e fechamento de todos os períodos.';return}
   if(hoursDraft.hours.some(function(h){return h.open===h.close})){$('hoursErr').textContent='Um período tem abertura e fechamento iguais. Corrija ou remova.';return}
   if(hoursDraft.deliveryRules.some(function(r){return !r.neighborhood.trim()})){$('hoursErr').textContent='Dê nome a todos os bairros ou remova os vazios.';return}
+  var badC=hoursDraft.couriers.find(function(c){var d=String(c.phone||'').replace(/\D/g,'').replace(/^55(?=\d{10,11}$)/,'');return !String(c.name||'').trim()||d.length<10||d.length>11});
+  if(badC){$('hoursErr').textContent=!String(badC.name||'').trim()?'Dê nome a todos os motoboys ou remova os vazios.':'WhatsApp do motoboy '+badC.name.trim()+': informe DDD + número.';return}
   var pt=$('pix-type').value,raw=$('pix-key').value.trim(),key=raw?pixKey(pt,raw):'';
   if(key===null){$('hoursErr').textContent={phone:'Celular do Pix: informe DDD + número.',doc:'CPF tem 11 números e CNPJ tem 14.',email:'E-mail do Pix inválido.',random:'A chave aleatória tem o formato 1234abcd-12ab-34cd-56ef-1234567890ab.'}[pt];$('pix-key').focus();return}
   if(key&&!$('pix-name').value.trim()){$('hoursErr').textContent='Informe o nome do recebedor do Pix.';$('pix-name').focus();return}
-  var c=clone(saved);['acceptingOrders','pickupEnabled','deliveryEnabled','hoursConfirmed','restrictDelivery'].forEach(function(k){c[k]=$('s-'+k).checked});c.hours=clone(hoursDraft.hours);c.deliveryRules=clone(hoursDraft.deliveryRules);
+  var c=clone(saved);['acceptingOrders','pickupEnabled','deliveryEnabled','hoursConfirmed','restrictDelivery'].forEach(function(k){c[k]=$('s-'+k).checked});c.hours=clone(hoursDraft.hours);c.deliveryRules=clone(hoursDraft.deliveryRules);c.couriers=hoursDraft.couriers.map(function(x){return {id:x.id||'',name:String(x.name).trim(),phone:String(x.phone).replace(/\D/g,'').replace(/^55(?=\d{10,11}$)/,''),active:!!x.active}});
   c.eta={pickup:$('eta-pickup').value.trim(),delivery:$('eta-delivery').value.trim()};
   c.pix=key?{type:pt,key:key,name:$('pix-name').value.trim(),city:'Barra do Ribeiro'}:null;
   try{var upd=await saveSettings(c);hoursDraft=null;renderHours();
     /* o servidor atual pode descartar campos novos: avisa em vez de fingir que salvou */
-    if((c.pix&&!(upd.pix&&upd.pix.key))||((c.eta.pickup||c.eta.delivery)&&!upd.eta))$('hoursErr').textContent='Salvo, mas o servidor não guardou o Pix ou o tempo estimado. Recarregue e tente de novo.';
+    if((c.pix&&!(upd.pix&&upd.pix.key))||((c.eta.pickup||c.eta.delivery)&&!upd.eta)||(c.couriers.length&&!(upd.couriers&&upd.couriers.length)))$('hoursErr').textContent='Salvo, mas o servidor não guardou o Pix, o tempo estimado ou os motoboys. Recarregue e tente de novo.';
     else toast('Funcionamento salvo')}
   catch(err){$('hoursErr').textContent=err.message}
 });
@@ -934,6 +1009,7 @@ function demoSeed(){
     mk(1041,98,'cancelled','pending','pickup','Lucas B.','(51) 98002-1144','',[['1-1',2]])];
   return {settings:{version:1,acceptingOrders:true,pickupEnabled:true,deliveryEnabled:true,hoursConfirmed:false,restrictDelivery:false,
     hours:[{day:1,open:'11:00',close:'23:00'},{day:2,open:'11:00',close:'23:00'},{day:3,open:'11:00',close:'23:00'},{day:4,open:'11:00',close:'23:00'},{day:5,open:'11:00',close:'23:30'},{day:6,open:'17:00',close:'23:30'}],
+    couriers:[{id:'m1',name:'Carlos',phone:'51999990001',active:true},{id:'m2',name:'Jorge',phone:'51999990002',active:true}],
     deliveryRules:[{neighborhood:'Centro',fee:500,available:true},{neighborhood:'Vila Nova',fee:600,available:true},{neighborhood:'Praia',fee:null,available:true}],products:products},orders:orders,next:1049};
 }
 async function demoApi(path,body,method){
@@ -953,6 +1029,7 @@ async function demoApi(path,body,method){
       if(body.action==='status'){if(nextStages(o).indexOf(body.value)<0)throw Error('Mudança de andamento não permitida.');o.status=body.value}
       if(body.action==='payment'){if(nextPays(o).indexOf(body.value)<0)throw Error('Mudança de pagamento não permitida.');o.payment=body.value}
       if(body.action==='fee'){o.fee=body.value;o.fee_approved=true}
+      if(body.action==='courier'){var dc=(demo.settings.couriers||[]).find(function(x){return x.id===body.value&&x.active});if(!dc)throw Error('Motoboy não encontrado ou desativado.');if(o.courier)(o.courierLog=o.courierLog||[]).push(o.courier);o.courier={id:dc.id,name:dc.name,at:new Date().toISOString()}}
       o.version++}
     return clone(o)}
   throw Error('Rota não encontrada');

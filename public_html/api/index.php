@@ -189,6 +189,15 @@ function cleanSettings(array $in, array $old): array {
         'type' => in_array($px['type'] ?? '', ['phone', 'doc', 'email', 'random'], true) ? $px['type'] : 'phone',
         'key' => str($px['key'], 77), 'name' => str($px['name'] ?? '', 25), 'city' => str($px['city'] ?? 'Barra do Ribeiro', 15),
     ] : null;
+    /* motoboys (só o painel vê): nome, WhatsApp e se está ativo */
+    $out['couriers'] = []; $cids = [];
+    foreach (array_slice((array) ($in['couriers'] ?? []), 0, 30) as $c) {
+        $cn = str($c['name'] ?? '', 60); if ($cn === '') fail(422, 'Motoboy sem nome.');
+        $ph = preg_replace('/\D/', '', (string) ($c['phone'] ?? '')); $ph = preg_replace('/^55(?=\d{10,11}$)/', '', $ph);
+        if (strlen($ph) < 10 || strlen($ph) > 11) fail(422, "WhatsApp do motoboy $cn: informe DDD + número.");
+        $cid = str($c['id'] ?? '', 32); if ($cid === '' || isset($cids[$cid])) $cid = bin2hex(random_bytes(6)); $cids[$cid] = 1;
+        $out['couriers'][] = ['id' => $cid, 'name' => $cn, 'phone' => $ph, 'active' => !empty($c['active'])];
+    }
     $out['products'] = []; $ids = [];
     foreach (array_slice((array) ($in['products'] ?? []), 0, 500) as $p) {
         $id = str($p['id'] ?? '', 64); $name = str($p['name'] ?? '', 100);
@@ -484,6 +493,13 @@ try {
                 if ($val === 'rejected' && !empty($b['cancel']) && !in_array($o['status'], ['completed', 'cancelled'], true)) {
                     $o['status'] = 'cancelled'; $o['cancelReason'] = $o['payReason'] !== '' ? $o['payReason'] : 'Pix não identificado';
                 }
+            } elseif ($act === 'courier') {
+                // motoboy chamado pelo painel: vale o último; os anteriores ficam no histórico do pedido
+                if (!$del || in_array($o['status'], ['completed', 'cancelled'], true)) { $pdo->rollBack(); fail(409, 'Este pedido não está aguardando entrega.'); }
+                $c = null; foreach ((settings()['couriers'] ?? []) as $x) if ($x['id'] === (string) $val && $x['active']) $c = $x;
+                if (!$c) { $pdo->rollBack(); fail(422, 'Motoboy não encontrado ou desativado. Atualize a lista em Funcionamento.'); }
+                if (!empty($o['courier'])) $o['courierLog'][] = $o['courier'];
+                $o['courier'] = ['id' => $c['id'], 'name' => $c['name'], 'at' => iso(nowMs())];
             } elseif ($act === 'fee') {
                 if (!$del || in_array($o['status'], ['completed', 'cancelled'], true) || $o['payment'] === 'approved') { $pdo->rollBack(); fail(409, 'Não dá para mudar o frete agora.'); }
                 $o['fee'] = cents($val, 100000); $o['fee_approved'] = true;

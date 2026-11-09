@@ -119,7 +119,7 @@ async function api(path,body,method){
 function pathFor(){return 'orders/'+encodeURIComponent(id)+(token?'?token='+encodeURIComponent(token):'')}
 
 var titles={received:'Pedido recebido',preparing:'Em preparo',ready:'Pronto!',out_for_delivery:'Saiu para entrega',completed:'Pedido concluído',cancelled:'Pedido cancelado'};
-function subtitle(o){var s=o.snapshot;return {received:'O Léo já recebeu seu pedido e vai começar em instantes.',preparing:'Seu pedido está na chapa.',ready:s.mode==='delivery'?'Pronto e aguardando o entregador.':s.mode==='dine_in'?'Já vamos servir'+(s.table?' na mesa '+s.table:' você')+'.':'Pode vir buscar no balcão: Av. Visconde do Rio Grande, 1451.',out_for_delivery:'O entregador está a caminho.',completed:'Bom apetite! Obrigado por pedir no Léo.',cancelled:'Se tiver dúvidas, fale com o restaurante pelo WhatsApp.'}[o.status]}
+function subtitle(o){var s=o.snapshot;return {received:'O Léo já recebeu seu pedido e vai começar em instantes.',preparing:'Seu pedido está na chapa.',ready:s.mode==='delivery'?'Pronto e aguardando o entregador.':s.mode==='dine_in'?'Já vamos servir'+(s.table?' na mesa '+s.table:' você')+'.':'Pode vir buscar no balcão: Av. Visconde do Rio Grande, 1451.',out_for_delivery:'Teu pedido saiu para entrega'+(o.courier&&o.courier.name?' com o motoboy '+o.courier.name:'')+'. O entregador está a caminho.',completed:'Bom apetite! Obrigado por pedir no Léo.',cancelled:'Se tiver dúvidas, fale com o restaurante pelo WhatsApp.'}[o.status]}
 
 function render(){
   var o=order,s=o.snapshot;
