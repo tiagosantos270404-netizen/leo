@@ -23,4 +23,10 @@ return [
     'almoco_dias'   => [1, 2, 3, 4, 5, 6],
     'almoco_inicio' => '11:30',
     'almoco_fim'    => '15:00',
+
+    // agendamento do almoço: pode pedir desde a abertura do restaurante e escolher a hora de receber/retirar
+    // (de 'almoco_agenda_inicio' até 'almoco_agenda_fim', de tantos em tantos minutos)
+    'almoco_agenda_inicio' => '11:30',
+    'almoco_agenda_fim'    => '14:30',
+    'almoco_agenda_passo'  => 30,
 ];

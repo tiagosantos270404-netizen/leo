@@ -81,6 +81,7 @@ main .inner{display:grid;gap:14px}
     <a class="logo" href="/" title="Página inicial"><img src="img/logo-sm.png" alt="Léo Restaurante &amp; Lancheria" width="52" height="56"></a>
     <div><p id="kicker">Seu pedido</p><h1 id="title">Carregando…</h1></div>
     <p id="subtitle"></p>
+    <p class="okmsg" id="lunchWhen" hidden style="font-size:17px"></p>
   </div>
 </header>
 <main class="gut"><div class="inner">
@@ -127,6 +128,9 @@ function render(){
   $('title').textContent=titles[o.status];$('subtitle').textContent=subtitle(o);
   if(o.proof&&o.status==='received'&&o.payment==='review'){$('title').textContent='Aguardando confirmação';$('subtitle').textContent='Assim que o Léo confirmar o Pix, teu pedido entra em preparo.'}
   if(o.proof&&o.status==='received'&&o.payment==='rejected'){$('title').textContent='Pagamento recusado';$('subtitle').textContent='Fale com o Léo pelo WhatsApp para resolver.'}
+  // almoço agendado: hora que o cliente escolheu
+  var lt=s.lunch&&s.lunch.time,lw=$('lunchWhen');
+  if(lt&&['completed','cancelled'].indexOf(o.status)<0){lw.hidden=false;lw.innerHTML='Teu almoço será <b>'+(s.mode==='delivery'?'entregue':s.mode==='dine_in'?'servido':'retirado')+'</b> '+(lt==='asap'?'o quanto antes, a partir das 11:30':'às <b>'+esc(lt)+'</b>')+'.'}else lw.hidden=true;
   // frete a aceitar
   var fc=$('feeCard');
   if(s.mode==='delivery'&&o.status==='received'&&!o.fee_approved){fc.hidden=false;

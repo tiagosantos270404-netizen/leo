@@ -107,10 +107,23 @@ function isDeliveryOpenNow(): bool {
     $h = schedule(); $n = nowLocal();
     return inWindow($h['dias'], $h['abre'], $h['fecha'], $n) && inWindow($h['entrega_dias'] ?? $h['dias'], $h['entrega_inicio'], $h['entrega_fim'], $n);
 }
+/* almoço pode ser pedido desde a abertura do restaurante até o fim do almoço (antes das 11:30 vai agendado) */
 function isLunchOpenNow(): bool {
     $h = schedule(); if (empty($h['almoco_inicio'])) return true; $n = nowLocal();
-    return inWindow($h['dias'], $h['abre'], $h['fecha'], $n) && inWindow($h['almoco_dias'] ?? $h['dias'], $h['almoco_inicio'], $h['almoco_fim'], $n);
+    return inWindow($h['dias'], $h['abre'], $h['fecha'], $n) && inWindow($h['almoco_dias'] ?? $h['dias'], $h['abre'], $h['almoco_fim'], $n);
 }
+function nowMin(): int { $n = nowLocal(); return (int) $n->format('G') * 60 + (int) $n->format('i'); }
+/* antes do início do almoço: o pedido sai agendado e o cliente marca "Estou ciente" */
+function isLunchEarly(): bool { $h = schedule(); return !empty($h['almoco_inicio']) && nowMin() < hm($h['almoco_inicio']); }
+/* horários para receber/retirar o almoço: 11:30, 12:00 ... 14:30 */
+function lunchSlots(): array {
+    $h = schedule(); $from = hm($h['almoco_agenda_inicio'] ?? $h['almoco_inicio'] ?? '11:30'); $to = hm($h['almoco_agenda_fim'] ?? '14:30');
+    $step = max(5, (int) ($h['almoco_agenda_passo'] ?? 30)); $out = [];
+    for ($m = $from; $m <= $to; $m += $step) $out[] = sprintf('%02d:%02d', intdiv($m, 60), $m % 60);
+    return $out;
+}
+/* os que ainda não passaram agora */
+function lunchSlotsAvailable(): array { $now = nowMin(); return array_values(array_filter(lunchSlots(), fn($t) => hm($t) >= $now)); }
 /* [1,2,3,4,5,6] -> "segunda a sábado" (ou "Seg a Sáb" no formato curto) */
 function diasTexto(array $d, bool $curto): string {
     $nomes = $curto ? ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'] : ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
@@ -128,7 +141,8 @@ function scheduleInfo(): array {
     return [
         'open' => isOpenNow(), 'deliveryOpen' => isDeliveryOpenNow(), 'serverTime' => nowLocal()->format('Y-m-d\TH:i:sP'),
         'text' => diasTexto($h['dias'], true) . ' • Aberto das ' . $h['abre'] . ' às ' . $h['fecha'] . ' • Entregas ' . ($sameDays ? '' : diasTexto($ed, true) . ' ') . 'das ' . $h['entrega_inicio'] . ' às ' . $h['entrega_fim'] . $lunch,
-        'lunchOpen' => isLunchOpenNow(),
+        'lunchOpen' => isLunchOpenNow(), 'lunchEarly' => isLunchEarly(), 'lunchSlots' => lunchSlotsAvailable(),
+        'lunchFrom' => $h['almoco_agenda_inicio'] ?? ($h['almoco_inicio'] ?? ''),
         'lunchMsg' => empty($h['almoco_inicio']) ? '' : 'O almoço à la minuta sai de ' . diasTexto($ad, false) . ', das ' . $h['almoco_inicio'] . ' às ' . $h['almoco_fim'] . '.',
         'closedMsg' => 'Estamos fechados. Funcionamos de ' . diasTexto($h['dias'], false) . ', das ' . $h['abre'] . ' às ' . $h['fecha'] . '.',
         'deliveryMsg' => 'Entregas de ' . diasTexto($ed, false) . ', das ' . $h['entrega_inicio'] . ' às ' . $h['entrega_fim'],
@@ -222,12 +236,13 @@ function compute(array $in, array $s): array {
         $address = $street . ', ' . $number . ($addr['complement'] !== '' ? ' - ' . $addr['complement'] : '');
     }
     $byId = []; foreach ($s['products'] as $p) $byId[$p['id']] = $p;
-    $lines = []; $sub = 0; $raw = array_slice((array) ($in['lines'] ?? []), 0, 51);
+    $lines = []; $sub = 0; $hasLunch = false; $raw = array_slice((array) ($in['lines'] ?? []), 0, 51);
     if (!$raw) fail(422, 'A sacola está vazia.'); if (count($raw) > 50) fail(422, 'Itens demais em um pedido.');
     foreach ($raw as $l) {
         $p = $byId[(string) ($l['id'] ?? '')] ?? null;
         if (!$p || !$p['available']) fail(409, 'Um item da sacola não está mais disponível. Revise a sacola.');
         if ($p['group'] === 5 && !isLunchOpenNow()) fail(409, scheduleInfo()['lunchMsg'] . ' Tire a minuta da sacola para continuar.');
+        if ($p['group'] === 5) $hasLunch = true;
         $qty = (int) ($l['qty'] ?? 0); if ($qty < 1 || $qty > 30) fail(422, 'Quantidade inválida.');
         $ex = []; $unit = $p['price'];
         foreach (array_unique(array_map('strval', (array) ($l['extras'] ?? []))) as $xid) {
@@ -237,6 +252,21 @@ function compute(array $in, array $s): array {
         }
         $lines[] = ['id' => $p['id'], 'name' => ($p['group'] === 5 ? 'Minuta ' : '') . $p['name'], 'qty' => $qty, 'total' => $unit * $qty, 'extras' => $ex, 'note' => str($l['note'] ?? '', 300)];
         $sub += $unit * $qty;
+    }
+    /* almoço: hora escolhida para receber/retirar ("asap" = o quanto antes); antes das 11:30 exige "Estou ciente" */
+    $lunch = null;
+    if ($hasLunch) {
+        $t = (string) ($in['lunchTime'] ?? '');
+        if ($t === '') fail(422, 'Escolha o horário do almoço.');
+        $slots = lunchSlots(); $from = $slots[0] ?? '11:30'; $to = end($slots) ?: '14:30';
+        if ($t !== 'asap') {
+            if (!preg_match('/^\d{2}:\d{2}$/', $t) || hm($t) < hm($from) || hm($t) > hm($to)) fail(422, "O horário do almoço vai de $from até $to.");
+            if (!in_array($t, $slots, true)) fail(422, 'Escolha um dos horários do almoço da lista.');
+            if (hm($t) < nowMin()) fail(409, 'Esse horário do almoço já passou. Escolha outro.');
+        }
+        $aware = !empty($in['lunchAware']);
+        if (isLunchEarly() && !$aware) fail(422, "Entregas e retiradas de almoço a partir das $from. Marque \"Estou ciente\" para continuar.");
+        $lunch = ['time' => $t, 'aware' => $aware];
     }
     $fee = $mode === 'delivery' ? null : 0; // taxa de entrega só na entrega
     if ($mode === 'delivery') {
@@ -248,7 +278,7 @@ function compute(array $in, array $s): array {
     /* forma de pagamento: pix | card | cash ('' em pedidos de versões antigas da loja) */
     $pay = in_array($in['pay'] ?? '', ['pix', 'card', 'cash'], true) ? $in['pay'] : '';
     if ($pay === 'pix' && $mode === 'delivery' && $fee === null) fail(409, 'Para outros bairros, pague na entrega.');
-    return ['mode' => $mode, 'table' => $table, 'pay' => $pay, 'customer' => ['name' => $name, 'phone' => $phone], 'address' => $address, 'addr' => $addr, 'neighborhood' => $nb,
+    return ['mode' => $mode, 'table' => $table, 'pay' => $pay, 'customer' => ['name' => $name, 'phone' => $phone], 'address' => $address, 'addr' => $addr, 'neighborhood' => $nb, 'lunch' => $lunch,
         'notes' => str($in['notes'] ?? '', 600), 'lines' => $lines, 'subtotal' => $sub, 'fee' => $fee];
 }
 function quoteSig(array $q, int $exp): string { return $exp . '.' . hmac('quote.' . $exp . '.' . json_encode($q, JSON_UNESCAPED_UNICODE)); }
@@ -376,7 +406,7 @@ try {
         $id = bin2hex(random_bytes(12)); $ms = nowMs();
         $o = ['id' => $id, 'number' => '', 'created' => iso($ms), 'status' => 'received', 'payment' => $needProof ? 'review' : 'pending', 'fee' => $q['fee'],
             'fee_approved' => $q['fee'] !== null, 'cancelReason' => '', 'payMethod' => $q['pay'], 'version' => 1,
-            'snapshot' => ['customer' => $q['customer'], 'mode' => $q['mode'], 'table' => $q['table'], 'address' => $q['address'], 'addr' => $q['addr'], 'neighborhood' => $q['neighborhood'], 'notes' => $q['notes'], 'lines' => $q['lines'], 'subtotal' => $q['subtotal']]];
+            'snapshot' => ['customer' => $q['customer'], 'mode' => $q['mode'], 'table' => $q['table'], 'address' => $q['address'], 'addr' => $q['addr'], 'neighborhood' => $q['neighborhood'], 'lunch' => $q['lunch'], 'notes' => $q['notes'], 'lines' => $q['lines'], 'subtotal' => $q['subtotal']]];
         $pdo = db(); $pdo->beginTransaction();
         $pdo->prepare('INSERT INTO orders (id, created_ts, idem, version, data) VALUES (?, ?, ?, 1, ?)')->execute([$id, $ms, $key, '{}']);
         $num = (int) $pdo->lastInsertId(); $o['number'] = '#' . $num;
