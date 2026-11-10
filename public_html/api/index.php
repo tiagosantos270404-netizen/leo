@@ -32,7 +32,7 @@ function db(): PDO {
     $pdo = new PDO('mysql:host=' . ($d['host'] ?? '127.0.0.1') . ';dbname=' . $d['name'] . ';charset=utf8mb4', $d['user'], $d['pass'], [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, PDO::ATTR_EMULATE_PREPARES => false,
     ]);
-    migrate($pdo); unlockFees($pdo);
+    migrate($pdo); unlockFees($pdo); addPastelQueijo($pdo);
     return $pdo;
 }
 function migrate(PDO $pdo): void {
@@ -66,6 +66,31 @@ function unlockFees(PDO $pdo): void {
         $pdo->commit();
     }
     @file_put_contents($flag, date('c') . ' ' . count($rows));
+}
+
+/* item novo no cardápio: Pastel de Queijo (R$ 7,00), logo depois do Pastel Presunto/Queijo.
+   Uma única vez; se o Léo já tiver um item com esse nome, não mexe. */
+function addPastelQueijo(PDO $pdo): void {
+    $flag = __DIR__ . '/.migrated-pastel-queijo-v1';
+    if (is_file($flag)) return;
+    $pdo->beginTransaction();
+    $row = $pdo->query('SELECT version, data FROM settings WHERE id=1 FOR UPDATE')->fetch();
+    $s = $row ? json_decode($row['data'], true) : null; $added = false;
+    if (is_array($s) && is_array($s['products'] ?? null)) {
+        $has = false; $pos = null;
+        foreach ($s['products'] as $i => $p) {
+            if (normBairro((string) ($p['name'] ?? '')) === 'pastel de queijo' || ($p['id'] ?? '') === '4-14') $has = true;
+            if (($p['name'] ?? '') === 'Pastel Presunto/Queijo') $pos = $i + 1;
+        }
+        if (!$has) {
+            $item = ['id' => '4-14', 'name' => 'Pastel de Queijo', 'description' => '', 'group' => 4, 'price' => 700, 'available' => true, 'badge' => '', 'extras' => []];
+            array_splice($s['products'], $pos ?? count($s['products']), 0, [$item]);
+            $pdo->prepare('UPDATE settings SET version=version+1, data=? WHERE id=1')->execute([json_encode($s, JSON_UNESCAPED_UNICODE)]);
+            $added = true;
+        }
+    }
+    $pdo->commit();
+    @file_put_contents($flag, date('c') . ($added ? ' adicionado' : ' já existia'));
 }
 
 /* ---------- utilidades ---------- */
