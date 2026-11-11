@@ -426,7 +426,7 @@ function localDay(d){return new Intl.DateTimeFormat('en-CA',{timeZone:'America/S
 function ago(iso){var m=Math.round((Date.now()-new Date(iso))/60000);return m<1?'agora':m<60?'há '+m+' min':fmtTime.format(new Date(iso))}
 var stageNames={received:'Novo',preparing:'Em preparo',ready:'Pronto',out_for_delivery:'Saiu p/ entrega',completed:'Concluído',cancelled:'Cancelado'};
 var stageAction={preparing:'Iniciar preparo',ready:'Marcar pronto',out_for_delivery:'Saiu para entrega',completed:'Concluir',cancelled:'Cancelar'};
-var payNames={pending:'Pagamento pendente',review:'Pix a conferir',approved:'Pago',rejected:'Pagamento recusado',expired:'Expirado',refunded:'Reembolsado'};
+var payNames={pending:'Pagamento pendente',review:'Aguardando conferência do Pix',approved:'Pago',rejected:'Pagamento recusado',expired:'Expirado',refunded:'Reembolsado'};
 var payAction={approved:'Marcar como pago',rejected:'Recusado',expired:'Expirado',pending:'Voltar p/ pendente',refunded:'Reembolsado'};
 var categories=['Lanches','Dogs','Torradas','Fritas','Pastéis e salgados','Almoço à la minuta','Bebidas frias','Bebidas quentes'];
 var weekdays=['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
@@ -614,7 +614,7 @@ function isPix(o){return o.payMethod==='pix'||!!o.proof}
 function waPill(o){return isWa(o)?'<span class="pill p-wa">WhatsApp</span>':''}
 function renderPixQueue(){
   var q=orders.filter(needsPixCheck).sort(function(a,b){return new Date(a.created)-new Date(b.created)});
-  $('pixQueue').innerHTML=q.length?'<section class="pixq" aria-live="polite"><h2>'+(q.length===1?'1 Pix a conferir':q.length+' Pix a conferir')+'</h2><p class="muted" style="font-size:13.5px">Confira no app do banco e clique em Pagamento confirmado.</p>'+
+  $('pixQueue').innerHTML=q.length?'<section class="pixq" aria-live="polite"><h2>'+(q.length===1?'1 Pix aguardando conferência':q.length+' Pix aguardando conferência')+'</h2><p class="muted" style="font-size:13.5px">Confira no app do banco e clique em Pix conferido.</p>'+
     q.map(function(o){return '<div class="row"><b>'+esc(o.number)+'</b><span>'+esc(o.snapshot.customer.name)+' · '+money(total(o))+' · '+stageNames[o.status]+' · '+ago(o.created)+(isWa(o)?' · WhatsApp':'')+'</span><button class="btn btn-sm btn-primary" data-open="'+o.id+'">Conferir</button></div>'}).join('')+'</section>':'';
 }
 $('pixQueue').addEventListener('click',function(e){var b=e.target.closest('[data-open]');if(b)openOrder(b.dataset.open)});
@@ -638,7 +638,7 @@ function renderOrders(){
 function cardHTML(o){
   var s=o.snapshot, nx=nextStages(o).filter(function(n){return n!=='cancelled'})[0], blocked=proofLocked(o);
   var items=s.lines.map(function(l){return l.qty+'× '+esc(l.name)}).join(' · ');
-  return '<article class="ocard" data-s="'+o.status+'" data-pay="'+o.payment+'">'+typeBanner(s)+lunchTag(s)+(needsPixCheck(o)?'<div class="hint">Pix a conferir: confira no banco e clique em Pagamento confirmado</div>':'')+
+  return '<article class="ocard" data-s="'+o.status+'" data-pay="'+o.payment+'">'+typeBanner(s)+lunchTag(s)+(needsPixCheck(o)?'<div class="hint">Aguardando conferência do Pix: confira no banco e clique em Pix conferido</div>':'')+
     '<div class="head"><h3>'+esc(o.number)+'</h3><span class="when">'+ago(o.created)+'</span></div>'+
     '<div class="pills"><span class="pill p-'+o.status+'">'+stageNames[o.status]+'</span><span class="pill p-'+o.payment+'">'+payNames[o.payment]+'</span>'+waPill(o)+'</div>'+
     '<div><div class="who">'+esc(s.customer.name)+'</div>'+(s.mode==='delivery'?'<div class="muted" style="font-size:13.5px">'+(s.addr&&s.addr.street?esc(s.addr.street)+', <b style="color:var(--carvao,inherit)">'+esc(s.addr.number)+'</b> - ':'')+esc(s.neighborhood)+'</div>':'')+'</div>'+
@@ -707,12 +707,14 @@ function drawOrder(keepOpen){
   if(s.mode==='delivery'&&o.fee===null&&['completed','cancelled'].indexOf(o.status)<0)body+='<p class="note">Frete a combinar (bairro sem frete cadastrado). O cliente paga o frete na entrega. Anote o valor abaixo quando souber.</p>';
   if(s.mode==='delivery'&&o.fee===null&&['completed','cancelled'].indexOf(o.status)<0&&o.payment!=='approved')body+='<div class="box"><h3>Frete</h3><div style="display:flex;gap:8px"><div class="price-in" style="flex:1"><span>R$</span><input type="number" id="feeIn" min="0" max="10000" step="0.50" inputmode="decimal" value="'+(o.fee==null?'':(o.fee/100).toFixed(2))+'"></div><button class="btn" data-act="fee">Salvar frete</button></div></div>';
   var nx=nextStages(o),np=nextPays(o);
-  if(o.proof){var purl='/api/orders/'+encodeURIComponent(o.id)+'/proof';
-    /* comprovante logo abaixo do status, no topo do pedido */
-    body=body.split('<!--proof-->').join('<div class="box" id="proofBox"><h3>Comprovante do Pix</h3>'+
-      (o.proof.type==='application/pdf'?'<a class="btn" href="'+purl+'" target="_blank" rel="noopener">Abrir PDF do comprovante ↗</a>':'<img class="proofimg" src="'+purl+'" alt="Comprovante do Pix do pedido '+esc(o.number)+'" data-zoom>')+
-      '<p class="muted" style="font-size:13px">Enviado em '+fmtDate.format(new Date(o.proof.sent))+' · valor do pedido: <b>'+money(total(o))+'</b>'+(o.proof.type==='application/pdf'?'':' · toque na imagem para ampliar')+'</p>'+
-      (o.payment==='review'?'<p class="note">Pix a conferir: o pedido já foi liberado. Confira no app do banco se o valor caiu.</p><div class="btnrow"><button class="btn btn-primary" data-act="payment" data-v="approved">Pagamento confirmado</button><button class="btn btn-danger" data-act="rejectpix">Pix não caiu</button></div>':
+  if(isPix(o)){var purl='/api/orders/'+encodeURIComponent(o.id)+'/proof';
+    /* Pix logo abaixo do status: o cliente manda o comprovante pelo WhatsApp; pedidos antigos podem ter comprovante anexado no site */
+    body=body.split('<!--proof-->').join('<div class="box" id="proofBox"><h3>Pix</h3>'+
+      (o.proof?(o.proof.type==='application/pdf'?'<a class="btn" href="'+purl+'" target="_blank" rel="noopener">Abrir PDF do comprovante ↗</a>':'<img class="proofimg" src="'+purl+'" alt="Comprovante do Pix do pedido '+esc(o.number)+'" data-zoom>')+
+        '<p class="muted" style="font-size:13px">Comprovante anexado no site em '+fmtDate.format(new Date(o.proof.sent))+(o.proof.type==='application/pdf'?'':' · toque na imagem para ampliar')+'</p>':
+        '<p class="muted" style="font-size:13px">O cliente manda o comprovante pelo WhatsApp do restaurante.</p>')+
+      '<p style="font-size:14px">Valor do pedido: <b>'+money(total(o))+'</b></p>'+
+      (o.payment==='review'?'<p class="note">Aguardando conferência do Pix. Confira no app do banco se o valor caiu.</p><div class="btnrow"><button class="btn btn-primary" data-act="payment" data-v="approved">Pix conferido</button><button class="btn btn-danger" data-act="rejectpix">Pix não caiu</button></div>':
        o.payment==='rejected'?'<p class="note">Pix não caiu'+(o.payReason?': '+esc(o.payReason):'')+'</p><div class="btnrow"><button class="btn btn-sm" data-act="payment" data-v="approved">O Pix caiu: marcar como pago</button></div>':
        o.payment==='approved'?'<p class="pill p-approved" style="justify-self:start">Pago</p>':'')+'</div>')}
   body+='<div class="box"><h3>Andamento</h3>'+(proofLocked(o)&&o.status==='received'?'<p class="muted" style="font-size:13px">O preparo libera depois que o Pix for confirmado.</p>':'')+'<div class="btnrow">'+(nx.length?nx.map(function(n){return '<button class="btn '+(n==='cancelled'?'btn-danger':'btn-primary')+'" data-act="status" data-v="'+n+'" '+(proofLocked(o)&&n!=='cancelled'?'disabled':'')+'>'+stageAction[n]+'</button>'}).join(''):'<span class="muted">Pedido encerrado.</span>')+'</div></div>'+
@@ -745,7 +747,7 @@ $('dBody').addEventListener('click',async function(e){
     if(act==='status'&&val==='cancelled'){var rs=($('cancelReason')||{}).value;rs=String(rs||'').trim();if(rs){extra={reason:rs};saveReason(cur.id,rs)}}
     if(act==='fee'){var v=$('feeIn').value.trim();if(!v){$('oErr').textContent='Informe o valor do frete.';return}val=Math.round(Number(v.replace(',','.'))*100);if(!(val>=0)){$('oErr').textContent='Valor inválido.';return}}
     $('dBody').querySelectorAll('button').forEach(function(x){x.disabled=true});
-    try{var upd=await patchOrder(cur.o,act,val,extra);cur={kind:'order',id:upd.id,version:upd.version,o:upd};drawOrder(true);toast(act==='status'?(val==='cancelled'?'Pedido cancelado. Avise o cliente pelo botão do WhatsApp.':stageNames[val]):act==='payment'?(val==='approved'?'Pagamento confirmado.':val==='rejected'?(upd.status==='cancelled'?'Pix não caiu: pedido cancelado. Avise o cliente pelo WhatsApp.':'Marcado: Pix não caiu.'):payNames[val]):'Frete salvo')}
+    try{var upd=await patchOrder(cur.o,act,val,extra);cur={kind:'order',id:upd.id,version:upd.version,o:upd};drawOrder(true);toast(act==='status'?(val==='cancelled'?'Pedido cancelado. Avise o cliente pelo botão do WhatsApp.':stageNames[val]):act==='payment'?(val==='approved'?(isPix(cur.o)?'Pix conferido.':'Pagamento confirmado.'):val==='rejected'?(upd.status==='cancelled'?'Pix não caiu: pedido cancelado. Avise o cliente pelo WhatsApp.':'Marcado: Pix não caiu.'):payNames[val]):'Frete salvo')}
     catch(err){var m=err.message;await openOrder(cur.id,true);$('oErr').textContent=m}
   }
 });

@@ -64,6 +64,7 @@ main .inner{display:grid;gap:14px}
 .okmsg{background:var(--ok-bg);color:var(--ok);border-radius:12px;padding:12px 14px;font-weight:600}
 .btn{display:flex;align-items:center;justify-content:center;min-height:52px;padding:0 18px;border-radius:14px;border:1.5px solid var(--line);background:var(--surface);color:var(--carvao);font:700 16px var(--f-body);cursor:pointer;text-decoration:none;width:100%}
 .btn-primary{background:var(--brasa);border-color:var(--brasa);color:var(--brasa-ink)}
+.btn-wa{background:#167A3F;border-color:#167A3F;color:#fff;width:100%}
 .btn-primary:hover:not(:disabled){background:var(--cor-primaria-hover);border-color:var(--cor-primaria-hover)}
 .btn:disabled{opacity:.5}
 .muted{color:var(--muted)}
@@ -140,10 +141,12 @@ function render(){
     var b=$('acceptFee');if(b)b.onclick=acceptFee;
   }else fc.hidden=true;
   renderPix();
-  /* Pix com comprovante enviado pelo site */
-  var pc=$('payCard');
-  if(o.proof&&o.status!=='cancelled'&&(o.payment==='review'||o.payment==='rejected')){pc.hidden=false;
-    pc.innerHTML=o.payment==='review'?'<h2>Comprovante recebido</h2><p class="okmsg">Recebemos teu comprovante! Teu pedido já está com o Léo.</p><p class="muted" style="font-size:14px">Pix em conferência. Esta página atualiza sozinha.</p>':
+  /* Pix: o cliente manda o comprovante pelo WhatsApp (pedidos antigos podem ter comprovante anexado no site) */
+  var pc=$('payCard'),isPix=o.payMethod==='pix'||!!o.proof;
+  if(isPix&&o.status!=='cancelled'&&(o.payment==='review'||o.payment==='rejected')){pc.hidden=false;
+    var pTot=s.subtotal+(o.fee||0),pMsg='Olá! Segue o comprovante do Pix do pedido nº '+o.number+' - '+s.customer.name+' - valor '+money(pTot)+'.';
+    pc.innerHTML=o.payment==='review'?(o.proof?'<h2>Comprovante recebido</h2><p class="okmsg">Recebemos teu comprovante! Teu pedido já está com o Léo.</p><p class="muted" style="font-size:14px">Pix em conferência. Esta página atualiza sozinha.</p>':
+      '<h2>Envie o comprovante do Pix pelo WhatsApp</h2><p class="muted" style="font-size:14px">Teu pedido já está com o Léo. Manda o comprovante do Pix para ele conferir.</p><a class="btn btn-wa" href="https://wa.me/5551996200841?text='+encodeURIComponent(pMsg)+'" target="_blank" rel="noopener">Enviar comprovante no WhatsApp</a>'):
       '<h2>Pix não identificado</h2><p class="note">O Léo não encontrou o teu Pix'+(o.payReason?': '+esc(o.payReason):'')+'.</p><a class="btn btn-primary" href="https://wa.me/5551996200841?text='+encodeURIComponent('Olá! Meu Pix do pedido '+o.number+' não foi identificado. Pode me ajudar?')+'" target="_blank" rel="noopener">Falar com o Léo no WhatsApp</a>'}
   else pc.hidden=true;
   // etapas
